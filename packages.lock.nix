@@ -10,9 +10,9 @@
     sha256 = "57be87c22d9b49c112b6d24bc67d42508660e6b718b3db89c44e47e289137082";
   };
   fftools-ffi = {
-    version = "106d5813";
-    url = "https://github.com/moffatman/fftools-ffi/archive/106d58138071eba66c7d814f6573029c712cd597.tar.gz";
-    sha256 = "4577bb410978f5026270390aa65ebf0307250f3f5b0adf5353e060a5a3f4ee25";
+    version = "9b0d4da0";
+    url = "https://github.com/moffatman/fftools-ffi/archive/9b0d4da026d9c830702ec043c1f1f98d407025af.tar.gz";
+    sha256 = "mgf3ddt3yjmYBd2D0WeEnhgxKNjrEbjYnDx2t4YCfU8=";
   };
   freetype = {
     version = "2.13.2";

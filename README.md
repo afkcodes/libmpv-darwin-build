@@ -124,30 +124,12 @@ Inclusion:
 
 ## SwiftPM binary targets
 
-The `.zip` artifacts are intended for SwiftPM remote `binaryTarget` usage. They
-are generated for `xcframeworks` outputs and contain `Mpv.xcframework` at the
-archive root, so unzipping produces `Mpv.xcframework/Info.plist` without an
-extra `build/output` parent directory.
+The `.zip` artifacts are for SwiftPM remote `binaryTarget` usage. Each archive
+contains `Mpv.xcframework` at the archive root. The `.tar.gz` artifacts are the
+legacy media_kit CocoaPods/Makefile format.
 
-The `.tar.gz` artifacts are the legacy packaging format used by the older
-media_kit CocoaPods/Makefile flow.
-
-For release assets, GitHub computes and displays an immutable SHA256 `digest`.
-Use that digest as the SwiftPM checksum, without the `sha256:` prefix. It is the
-same value produced by:
-
-```shell
-$ swift package compute-checksum libmpv-xcframeworks_v0.0.1_ios-universal-video-default.zip
-```
-
-You can copy the digest from the release page or read it through the GitHub REST
-API:
-
-```shell
-$ ASSET=libmpv-xcframeworks_v0.0.1_ios-universal-video-default.zip
-$ curl -s https://api.github.com/repos/media-kit/libmpv-darwin-build/releases/tags/v0.0.1 \
-    | jq -r --arg asset "$ASSET" '.assets[] | select(.name == $asset) | .digest | sub("^sha256:"; "")'
-```
+Use the GitHub Release asset `digest` as the SwiftPM checksum, without the
+`sha256:` prefix.
 
 Example package manifest entry:
 

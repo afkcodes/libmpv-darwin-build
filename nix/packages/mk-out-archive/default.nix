@@ -23,7 +23,9 @@ let
 
   pname = import ../../utils/name/output.nix name;
   formats = import ../../utils/constants/formats.nix;
-  archiveName = "libmpv-${format}_${version}_${os}-${arch}-${variant}-${flavor}.tar.gz";
+  archiveBaseName = "libmpv-${format}_${version}_${os}-${arch}-${variant}-${flavor}";
+  archiveName = "${archiveBaseName}.tar.gz";
+  swiftpmArchiveName = "${archiveBaseName}.zip";
   src =
     if format == formats.libs then
       callPackage ../mk-out-libs/default.nix { }
@@ -39,6 +41,9 @@ pkgs.stdenvNoCC.mkDerivation {
   inherit version;
   dontUnpack = true;
   enableParallelBuilding = true;
+  nativeBuildInputs = pkgs.lib.optionals (format == formats.xcframeworks) [
+    pkgs.zip
+  ];
   inherit src;
   buildPhase = ''
     mkdir build
@@ -47,6 +52,14 @@ pkgs.stdenvNoCC.mkDerivation {
 
     cp --no-preserve=mode -r $src $DIRNAME
     tar -czvf build/${archiveName} $DIRNAME
+
+    ${pkgs.lib.optionalString (format == formats.xcframeworks) ''
+      BUILD_DIR=$PWD/build
+      (
+        cd $src
+        zip -X -y -r "$BUILD_DIR/${swiftpmArchiveName}" Mpv.xcframework
+      )
+    ''}
   '';
   installPhase = ''
     cp -r build $out

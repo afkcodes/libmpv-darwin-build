@@ -49,6 +49,12 @@ pkgs.stdenvNoCC.mkDerivation {
     for ARCHIVE in $ARCHIVES; do
       echo $ARCHIVE
       cp --no-preserve=mode $ARCHIVE/*.tar.gz build/
+
+      for ZIP in $ARCHIVE/*.zip; do
+        if [ -e "$ZIP" ]; then
+          cp --no-preserve=mode "$ZIP" build/
+        fi
+      done
     done
   '';
   installPhase = ''

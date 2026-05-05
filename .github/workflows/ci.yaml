@@ -66,6 +66,7 @@ jobs:
           if-no-files-found: error
           path: |
             result/*.tar.gz
+            result/*.zip
 
       - name: Release
         uses: softprops/action-gh-release@v2
@@ -74,3 +75,4 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             result/*.tar.gz
+            result/*.zip

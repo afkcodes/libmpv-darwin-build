@@ -77,7 +77,19 @@ $ tree result
 ├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-full.tar.gz
 ├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default.tar.gz
 ├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl.tar.gz
-└── libmpv-xcframeworks_v0.0.1_macos-universal-video-full.tar.gz
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full.tar.gz
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-default.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-full.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-default.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-full.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl.zip
+└── libmpv-xcframeworks_v0.0.1_macos-universal-video-full.zip
 ```
 </details>
 
@@ -92,7 +104,7 @@ $ open result
 ## Naming convention
 
 ```
-libmpv-<format>_<version>_<os>-<arch>-<variant>-<flavor>.tar.gz
+libmpv-<format>_<version>_<os>-<arch>-<variant>-<flavor>.<extension>
 ```
 
 | Component   | Notes                           | Value                      |
@@ -103,11 +115,49 @@ libmpv-<format>_<version>_<os>-<arch>-<variant>-<flavor>.tar.gz
 | **arch**    | Architecture                    | arm64, amd64, universal    |
 | **variant** | Usage context                   | audio, video               |
 | **flavor**  | Available decoders and encoders | default, full, encodersgpl |
+| **extension** | Packaging format              | tar.gz, zip                |
 
 Inclusion:
 
 - Variants: $audio \subset video$
 - Flavors: $audio \subset full \subset encodersgpl$
+
+## SwiftPM binary targets
+
+The `.zip` artifacts are intended for SwiftPM remote `binaryTarget` usage. They
+are generated for `xcframeworks` outputs and contain `Mpv.xcframework` at the
+archive root, so unzipping produces `Mpv.xcframework/Info.plist` without an
+extra `build/output` parent directory.
+
+The `.tar.gz` artifacts are the legacy packaging format used by the older
+media_kit CocoaPods/Makefile flow.
+
+For release assets, GitHub computes and displays an immutable SHA256 `digest`.
+Use that digest as the SwiftPM checksum, without the `sha256:` prefix. It is the
+same value produced by:
+
+```shell
+$ swift package compute-checksum libmpv-xcframeworks_v0.0.1_ios-universal-video-default.zip
+```
+
+You can copy the digest from the release page or read it through the GitHub REST
+API:
+
+```shell
+$ ASSET=libmpv-xcframeworks_v0.0.1_ios-universal-video-default.zip
+$ curl -s https://api.github.com/repos/media-kit/libmpv-darwin-build/releases/tags/v0.0.1 \
+    | jq -r --arg asset "$ASSET" '.assets[] | select(.name == $asset) | .digest | sub("^sha256:"; "")'
+```
+
+Example package manifest entry:
+
+```swift
+.binaryTarget(
+    name: "Mpv",
+    url: "https://github.com/<owner>/<repo>/releases/download/v0.0.1/libmpv-xcframeworks_v0.0.1_ios-universal-video-default.zip",
+    checksum: "<GitHub release asset digest without sha256:>"
+)
+```
 
 ## Minimum versions
 

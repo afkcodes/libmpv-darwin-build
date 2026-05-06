@@ -4,6 +4,10 @@
 # Example: make XCODE_PATH=/Applications/Xcode_16.1.0.app
 XCODE_PATH ?=
 
+# Version string to build. If not set, falls back to .nix/config/version.txt.
+# Example: make VERSION=0.0.1
+VERSION ?=
+
 # Flake output attribute to build. If not set, the default package is built.
 # Example: make TARGET=mk-out-archive-libs-macos-universal-video-default
 TARGET ?=
@@ -11,11 +15,13 @@ TARGET ?=
 all: build
 
 # Build using Nix flakes.
-# After the build, .nix/config/xcode.path is restored to its committed value.
+# After the build, .nix/config/xcode.path and .nix/config/version.txt are
+# restored to their committed values.
 .PHONY: build
 build:
-	trap 'git checkout -- .nix/config/xcode.path' EXIT; \
-	echo '$(XCODE_PATH)' > .nix/config/xcode.path; \
+	trap 'git checkout -- .nix/config/xcode.path .nix/config/version.txt' EXIT; \
+	$(if $(XCODE_PATH),echo '$(XCODE_PATH)' > .nix/config/xcode.path;,) \
+	$(if $(VERSION),echo '$(VERSION)' > .nix/config/version.txt;,) \
 	nix build -v -L \
 		--option sandbox true \
 		--option sandbox-fallback false \

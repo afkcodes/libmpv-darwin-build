@@ -23,10 +23,9 @@
       ];
       devShell = pkgs: {
         stdenv = pkgs.stdenvNoCC;
-        packages = [
-          pkgs.meson
-          pkgs.ninja
-          pkgs.pkg-config
+        packages = with pkgs; [
+          tree
+          gnumake
         ];
       };
       perSystem =

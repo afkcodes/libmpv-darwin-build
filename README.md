@@ -15,8 +15,7 @@ Heavily inspired by [Homebrew](https://github.com/Homebrew/brew) and
 ## Build
 
 ```shell
-$ echo \"v0.0.1\" > nix/utils/default/version.nix
-$ nix develop -c make
+$ nix develop -c make VERSION=v0.0.1
 $ tree result
 ```
 

@@ -48,34 +48,27 @@ jobs:
         id: xcode_path
         run: |
           XCODE_PATH=$(realpath /Applications/Xcode_16.1.0.app)
+
           ${XCODE_PATH}/Contents/Developer/usr/bin/xcodebuild -version
 
           echo "xcode_path=${XCODE_PATH}" >> $GITHUB_OUTPUT
-          echo ${XCODE_PATH}
 
       - name: Build version
         id: version
         run: |
-          case "${GITHUB_REF}" in
-          refs/tags/*)
-            VERSION=${GITHUB_REF#refs/tags/}
-            ;;
-          *)
-            VERSION=develop
-            ;;
-          esac
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
 
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo ${VERSION}
 
       # See ${workspace}/Makefile
       - name: Build
         env:
-          VERSION: ${{ steps.version.outputs.version }}
           XCODE_PATH: ${{ steps.xcode_path.outputs.xcode_path }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          echo \"$VERSION\" > nix/utils/default/version.nix
-          nix develop -c make XCODE_PATH=${XCODE_PATH}
+          nix develop -c make XCODE_PATH=${XCODE_PATH} VERSION=${VERSION}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7

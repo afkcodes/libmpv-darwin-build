@@ -25,7 +25,6 @@ let
   formats = import ../../utils/constants/formats.nix;
   archiveBaseName = "libmpv-${format}_${version}_${os}-${arch}-${variant}-${flavor}";
   archiveName = "${archiveBaseName}.tar.gz";
-  swiftpmArchiveName = "${archiveBaseName}.zip";
   src =
     if format == formats.libs then
       callPackage ../mk-out-libs/default.nix { }
@@ -57,7 +56,10 @@ pkgs.stdenvNoCC.mkDerivation {
       BUILD_DIR=$PWD/build
       (
         cd $src
-        zip -X -y -r "$BUILD_DIR/${swiftpmArchiveName}" Mpv.xcframework
+        for XCFRAMEWORK in *.xcframework; do
+          BASENAME=$(basename "$XCFRAMEWORK" .xcframework)
+          zip -X -y -r "$BUILD_DIR/${archiveBaseName}_$BASENAME.zip" "$XCFRAMEWORK"
+        done
       )
     ''}
   '';

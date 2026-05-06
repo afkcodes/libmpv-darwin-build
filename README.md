@@ -82,18 +82,14 @@ $ tree result
 ├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default.tar.gz
 ├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl.tar.gz
 ├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full.tar.gz
-├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-default.zip
-├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl.zip
-├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-full.zip
-├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default.zip
-├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl.zip
-├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full.zip
-├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-default.zip
-├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl.zip
-├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-full.zip
-├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default.zip
-├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl.zip
-└── libmpv-xcframeworks_v0.0.1_macos-universal-video-full.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Avcodec.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Avformat.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Avutil.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Mpv.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Avcodec.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Avformat.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Avutil.zip
+└── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Mpv.zip
 ```
 
 </details>
@@ -110,6 +106,7 @@ $ tree result
 
 ```
 libmpv-<format>_<version>_<os>-<arch>-<variant>-<flavor>.<extension>
+libmpv-xcframeworks_<version>_<os>-<arch>-<variant>-<flavor>_<framework>.zip
 ```
 
 | Component   | Notes                           | Value                      |
@@ -120,6 +117,7 @@ libmpv-<format>_<version>_<os>-<arch>-<variant>-<flavor>.<extension>
 | **arch**    | Architecture                    | arm64, amd64, universal    |
 | **variant** | Usage context                   | audio, video               |
 | **flavor**  | Available decoders and encoders | default, full, encodersgpl |
+| **framework** | SwiftPM binary target artifact | Mpv, Avcodec, Avformat, …  |
 | **extension** | Packaging format              | tar.gz, zip                |
 
 Inclusion:
@@ -129,9 +127,10 @@ Inclusion:
 
 ## SwiftPM binary targets
 
-The `.zip` artifacts are for SwiftPM remote `binaryTarget` usage. Each archive
-contains `Mpv.xcframework` at the archive root. The `.tar.gz` artifacts are the
-legacy media_kit CocoaPods/Makefile format.
+The `.tar.gz` artifacts are legacy bundles for the media_kit CocoaPods/Makefile
+flow. The `.zip` artifacts are per-xcframework SwiftPM artifacts: each zip
+contains exactly one `<Framework>.xcframework` at the archive root.
+Declare each required framework as a separate SwiftPM `binaryTarget`.
 
 Use the GitHub Release asset `digest` as the SwiftPM checksum, without the
 `sha256:` prefix.
@@ -141,7 +140,7 @@ Example package manifest entry:
 ```swift
 .binaryTarget(
     name: "Mpv",
-    url: "https://github.com/<owner>/<repo>/releases/download/v0.0.1/libmpv-xcframeworks_v0.0.1_ios-universal-video-default.zip",
+    url: "https://github.com/<owner>/<repo>/releases/download/v0.0.1/libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Mpv.zip",
     checksum: "<GitHub release asset digest without sha256:>"
 )
 ```

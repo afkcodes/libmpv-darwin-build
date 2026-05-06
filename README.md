@@ -12,6 +12,11 @@ Heavily inspired by [Homebrew](https://github.com/Homebrew/brew) and
 - Nix: [nixos.org/download/#nix-install-macos](https://nixos.org/download/#nix-install-macos)
 - Xcode: [./nix/overlays/xcode.nix](./nix/overlays/xcode.nix)
 
+> [!NOTE]
+> If you plan to use Nix only temporarily, prefer the
+> [Determinate Systems installer](https://github.com/DeterminateSystems/nix-installer)
+> which ships a built-in uninstaller, unlike the official one.
+
 ## Build
 
 ```shell

@@ -8,7 +8,7 @@
 
 let
   name = "xcframeworks";
-  version = import ../../utils/default/version.nix;
+  version = import ../../utils/version/default.nix { inherit pkgs; };
   pname = import ../../utils/name/output.nix name;
   oses = import ../../utils/constants/oses.nix;
   callPackage = pkgs.lib.callPackageWith {

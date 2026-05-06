@@ -8,7 +8,7 @@
 
 let
   name = "libs";
-  version = import ../../utils/default/version.nix;
+  version = import ../../utils/version/default.nix { inherit pkgs; };
 
   archs = import ../../utils/constants/archs.nix;
   flavors = import ../../utils/constants/flavors.nix;

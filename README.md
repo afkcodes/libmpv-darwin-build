@@ -10,13 +10,17 @@ Heavily inspired by [Homebrew](https://github.com/Homebrew/brew) and
 ## Setup
 
 - Nix: [nixos.org/download/#nix-install-macos](https://nixos.org/download/#nix-install-macos)
-- Xcode: [./nix/overlays/xcode.md#how-to-store-xcode-and-prevent-to-be-garbage-collected](./nix/overlays/xcode.md#how-to-store-xcode-and-prevent-to-be-garbage-collected)
+- Xcode: [./nix/overlays/xcode.nix](./nix/overlays/xcode.nix)
+
+> [!NOTE]
+> If you plan to use Nix only temporarily, prefer the
+> [Determinate Systems installer](https://github.com/DeterminateSystems/nix-installer)
+> which ships a built-in uninstaller, unlike the official one.
 
 ## Build
 
 ```shell
-$ echo \"v0.0.1\" > nix/utils/default/version.nix
-$ nix build -v
+$ nix develop -c make VERSION=v0.0.1
 $ tree result
 ```
 
@@ -91,14 +95,15 @@ $ tree result
 ├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl.zip
 └── libmpv-xcframeworks_v0.0.1_macos-universal-video-full.zip
 ```
+
 </details>
 
 ## Build a specific target
 
 ```shell
 $ nix flake show
-$ nix build -v .#mk-out-archive-libs-macos-universal-video-default
-$ open result
+$ nix develop -c make TARGET=mk-out-archive-libs-macos-universal-video-default
+$ tree result
 ```
 
 ## Naming convention
@@ -327,7 +332,7 @@ flowchart LR
 | freetype    | FreeType                             |       ✅       |
 | harfbuzz    | MIT                                  |       ✅       |
 | fribidi     | LGPL-2.1                             |       ✅       |
-| libpng     | zlib/libpng                           |       ✅       |
+| libpng      | zlib/libpng                          |       ✅       |
 | mbedtls     | Apache 2.0                           |       ✅       |
 | uchardet    | MPL-1.1, GPL-2, LGPL-2.1             |       ✅       |
 | libxml2     | MIT                                  |       ✅       |
@@ -342,7 +347,6 @@ flowchart LR
 
 - Some dependencies, which are not needed at the moment, may be added in the
   future:
-
   - [**libbluray**](https://code.videolan.org/videolan/libbluray): A library for
     reading and parsing Blu-ray discs, with support for advanced features such
     as BD-J menus and seamless branching

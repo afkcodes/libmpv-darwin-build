@@ -1,18 +1,33 @@
 name: ci
 
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "*"
+  pull_request:
+    branches:
+      - "*"
 
 jobs:
   ci:
     name: ci
-    # https://github.com/actions/runner-images/blob/main/images/macos/macos-15-Readme.md
+    # https://github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md
     runs-on: macos-15
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Platform info
+        run: |
+          printf "%-23s %s\n" "ProductName:"    "$(/usr/bin/sw_vers -productName)"
+          printf "%-23s %s\n" "ProductVersion:" "$(/usr/bin/sw_vers -productVersion)"
+          printf "%-23s %s\n" "BuildVersion:"   "$(/usr/bin/sw_vers -buildVersion)"
+          printf "%-23s %s\n" "Arch:"           "$(uname -m)"
 
-      - uses: DeterminateSystems/nix-installer-action@v14
+      - uses: actions/checkout@v6
+
+      - uses: DeterminateSystems/nix-installer-action@v22
         with:
           extra-conf: |
             sandbox = true
@@ -24,44 +39,39 @@ jobs:
       - name: Show Nix config
         run: nix config show
 
-      - name: Xcode version
-        run: /Applications/Xcode_16.1.0.app/Contents/Developer/usr/bin/xcodebuild -version
+      - uses: DeterminateSystems/magic-nix-cache-action@v13
+        with:
+          use-flakehub: false
 
-      # See ${workspace}/nix/overlays/xcode.md
-      - name: Set up Xcode in Nix store
+      # See ${workspace}/nix/overlays/xcode.nix
+      - name: Xcode path
+        id: xcode_path
         run: |
-          XCODE_APP=$(realpath /Applications/Xcode_16.1.0.app)
-          NIX_STORE_PATH="/nix/store/v92p4w6nxhyhq6lv0maq5cbb59mbxw5b-Xcode.app"
-          HASH="sha256:d63c91255c8e98603b7f1470067c5225ab673850eed35449f5a0105c936e581c"
+          XCODE_PATH=$(realpath /Applications/Xcode_16.1.0.app)
 
-          sudo cp -a $XCODE_APP $NIX_STORE_PATH
-          sudo sqlite3 /nix/var/nix/db/db.sqlite "INSERT INTO ValidPaths (path,hash,registrationTime) VALUES ('$NIX_STORE_PATH','$HASH',$(date +%s))"
+          ${XCODE_PATH}/Contents/Developer/usr/bin/xcodebuild -version
 
-      - uses: DeterminateSystems/magic-nix-cache-action@v8
+          echo "xcode_path=${XCODE_PATH}" >> $GITHUB_OUTPUT
 
-      - name: Determine version
+      - name: Build version
         id: version
         run: |
-          case "${GITHUB_REF}" in
-          refs/tags/*)
-            VERSION=${GITHUB_REF#refs/tags/}
-            ;;
-          *)
-            VERSION=develop
-            ;;
-          esac
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
 
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo ${VERSION}
 
+      # See ${workspace}/Makefile
       - name: Build
+        env:
+          XCODE_PATH: ${{ steps.xcode_path.outputs.xcode_path }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION=${{ steps.version.outputs.version }}
-          echo \"$VERSION\" > nix/utils/default/version.nix
-          nix build -v
+          nix develop -c make XCODE_PATH=${XCODE_PATH} VERSION=${VERSION}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           if-no-files-found: error
           path: |
@@ -69,7 +79,7 @@ jobs:
             result/*.zip
 
       - name: Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/')
         with:
           fail_on_unmatched_files: true

@@ -9,7 +9,7 @@
 
 let
   name = "archive";
-  version = import ../../utils/default/version.nix;
+  version = import ../../utils/version/default.nix { inherit pkgs; };
 
   callPackage = pkgs.lib.callPackageWith {
     inherit

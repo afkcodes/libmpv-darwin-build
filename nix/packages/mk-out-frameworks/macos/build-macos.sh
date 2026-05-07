@@ -87,4 +87,25 @@ find ${DEPS} -name "*.dylib" -type f | while read DYLIB; do
     ln -s A "${FRAMEWORK_DIR}/Versions/Current"
     ln -s Versions/Current/${FRAMEWORK_NAME} "${FRAMEWORK_DIR}/${FRAMEWORK_NAME}"
     ln -s Versions/Current/Resources "${FRAMEWORK_DIR}/Resources"
+
+    # Mpv.framework needs headers and a module map to be importable as a Swift module
+    if [ $FRAMEWORK_NAME == "Mpv" ]; then
+        # copy headers
+        mkdir -p "${FRAMEWORK_DIR}/Versions/A/Headers"
+        cp --no-preserve=mode "${MPV_HEADERS_PATH}"/*.h "${FRAMEWORK_DIR}/Versions/A/Headers/"
+
+        # generate the umbrella header (Mpv.h) re-exporting all of them
+        for header_path in "${MPV_HEADERS_PATH}/"*.h; do
+            header=$(basename "$header_path")
+            echo "#import \"$header\"" >> "${FRAMEWORK_DIR}/Versions/A/Headers/Mpv.h"
+        done
+
+        # copy the module map to allow importing the framework as a named module
+        mkdir -p "${FRAMEWORK_DIR}/Versions/A/Modules"
+        cp --no-preserve=mode "${MPV_MODULE_MAP_PATH}" "${FRAMEWORK_DIR}/Versions/A/Modules/module.modulemap"
+
+        # create sym links
+        ln -s Versions/Current/Headers "${FRAMEWORK_DIR}/Headers"
+        ln -s Versions/Current/Modules "${FRAMEWORK_DIR}/Modules"
+    fi
 done

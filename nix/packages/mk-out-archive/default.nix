@@ -52,7 +52,7 @@ pkgs.stdenvNoCC.mkDerivation {
   ''
   + pkgs.lib.optionalString (format == formats.xcframeworks) ''
     (
-      cd $src
+      cd ${archiveBaseName}
       for XCFRAMEWORK in *.xcframework; do
         FRAMEWORK_NAME=$(basename $XCFRAMEWORK .xcframework)
         zip -Xyr $build/${archiveBaseName}_$FRAMEWORK_NAME.zip $XCFRAMEWORK

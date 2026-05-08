@@ -71,17 +71,209 @@ $ tree result
 ├── libmpv-libs_v0.0.1_macos-universal-video-encodersgpl.tar.gz
 ├── libmpv-libs_v0.0.1_macos-universal-video-full.tar.gz
 ├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-default.tar.gz
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-default_Avcodec.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-default_Avfilter.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-default_Avformat.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-default_Avutil.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-default_Mbedcrypto.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-default_Mbedtls.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-default_Mbedx509.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-default_Mpv.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-default_Swresample.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-default_Swscale.zip
 ├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl.tar.gz
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl_Avcodec.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl_Avfilter.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl_Avformat.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl_Avutil.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl_Fftools-ffi.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl_Mbedcrypto.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl_Mbedtls.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl_Mbedx509.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl_Mpv.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl_Ogg.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl_Swresample.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl_Swscale.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl_Vorbis.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl_Vorbisenc.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-encodersgpl_Vorbisfile.zip
 ├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-full.tar.gz
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-full_Avcodec.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-full_Avfilter.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-full_Avformat.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-full_Avutil.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-full_Mbedcrypto.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-full_Mbedtls.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-full_Mbedx509.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-full_Mpv.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-full_Swresample.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-audio-full_Swscale.zip
 ├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default.tar.gz
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Ass.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Avcodec.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Avfilter.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Avformat.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Avutil.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Dav1d.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Freetype.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Fribidi.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Harfbuzz.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Mbedcrypto.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Mbedtls.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Mbedx509.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Mpv.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Png16.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Swresample.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Swscale.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Uchardet.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-default_Xml2.zip
 ├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl.tar.gz
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Ass.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Avcodec.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Avfilter.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Avformat.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Avutil.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Dav1d.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Fftools-ffi.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Freetype.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Fribidi.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Harfbuzz.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Mbedcrypto.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Mbedtls.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Mbedx509.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Mpv.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Ogg.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Png16.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Swresample.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Swscale.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Uchardet.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Vorbis.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Vorbisenc.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Vorbisfile.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Vpx.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_X264.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-encodersgpl_Xml2.zip
 ├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full.tar.gz
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Ass.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Avcodec.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Avfilter.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Avformat.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Avutil.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Dav1d.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Freetype.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Fribidi.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Harfbuzz.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Mbedcrypto.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Mbedtls.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Mbedx509.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Mpv.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Png16.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Swresample.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Swscale.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Uchardet.zip
+├── libmpv-xcframeworks_v0.0.1_ios-universal-video-full_Xml2.zip
 ├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-default.tar.gz
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-default_Avcodec.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-default_Avfilter.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-default_Avformat.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-default_Avutil.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-default_Mbedcrypto.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-default_Mbedtls.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-default_Mbedx509.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-default_Mpv.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-default_Swresample.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-default_Swscale.zip
 ├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl.tar.gz
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl_Avcodec.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl_Avfilter.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl_Avformat.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl_Avutil.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl_Fftools-ffi.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl_Mbedcrypto.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl_Mbedtls.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl_Mbedx509.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl_Mpv.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl_Ogg.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl_Swresample.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl_Swscale.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl_Vorbis.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl_Vorbisenc.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-encodersgpl_Vorbisfile.zip
 ├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-full.tar.gz
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-full_Avcodec.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-full_Avfilter.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-full_Avformat.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-full_Avutil.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-full_Mbedcrypto.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-full_Mbedtls.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-full_Mbedx509.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-full_Mpv.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-full_Swresample.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-audio-full_Swscale.zip
 ├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default.tar.gz
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Ass.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Avcodec.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Avfilter.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Avformat.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Avutil.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Dav1d.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Freetype.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Fribidi.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Harfbuzz.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Mbedcrypto.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Mbedtls.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Mbedx509.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Mpv.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Png16.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Swresample.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Swscale.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Uchardet.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-default_Xml2.zip
 ├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl.tar.gz
-└── libmpv-xcframeworks_v0.0.1_macos-universal-video-full.tar.gz
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Ass.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Avcodec.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Avfilter.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Avformat.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Avutil.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Dav1d.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Fftools-ffi.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Freetype.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Fribidi.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Harfbuzz.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Mbedcrypto.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Mbedtls.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Mbedx509.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Mpv.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Ogg.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Png16.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Swresample.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Swscale.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Uchardet.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Vorbis.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Vorbisenc.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Vorbisfile.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Vpx.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_X264.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-encodersgpl_Xml2.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full.tar.gz
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Ass.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Avcodec.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Avfilter.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Avformat.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Avutil.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Dav1d.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Freetype.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Fribidi.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Harfbuzz.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Mbedcrypto.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Mbedtls.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Mbedx509.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Mpv.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Png16.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Swresample.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Swscale.zip
+├── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Uchardet.zip
+└── libmpv-xcframeworks_v0.0.1_macos-universal-video-full_Xml2.zip
 ```
 
 </details>
@@ -97,17 +289,19 @@ $ tree result
 ## Naming convention
 
 ```
-libmpv-<format>_<version>_<os>-<arch>-<variant>-<flavor>.tar.gz
+libmpv-<format>_<version>_<os>-<arch>-<variant>-<flavor>[_<framework>].<extension>
 ```
 
-| Component   | Notes                           | Value                      |
-| ----------- | ------------------------------- | -------------------------- |
-| **format**  | Output format of built files    | libs, xcframeworks         |
-| **version** | Semantic version                | v0.0.1, …                  |
-| **os**      | Operating system                | ios, iossimulator, macos   |
-| **arch**    | Architecture                    | arm64, amd64, universal    |
-| **variant** | Usage context                   | audio, video               |
-| **flavor**  | Available decoders and encoders | default, full, encodersgpl |
+| Component     | Notes                                     | Value                      |
+| ------------- | ----------------------------------------- | -------------------------- |
+| **format**    | Output format of built files              | libs, xcframeworks         |
+| **version**   | Semantic version                          | v0.0.1, …                  |
+| **os**        | Operating system                          | ios, iossimulator, macos   |
+| **arch**      | Architecture                              | arm64, amd64, universal    |
+| **variant**   | Usage context                             | audio, video               |
+| **flavor**    | Available decoders and encoders           | default, full, encodersgpl |
+| **framework** | SwiftPM binary target artifact (optional) | Mpv, Avcodec, Avformat, …  |
+| **extension** | Packaging format                          | tar.gz, zip                |
 
 Inclusion:
 

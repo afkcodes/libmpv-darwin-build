@@ -48,7 +48,10 @@ pkgs.stdenvNoCC.mkDerivation {
     ARCHIVES="${pkgs.lib.concatStringsSep " " archives}"
     for ARCHIVE in $ARCHIVES; do
       echo $ARCHIVE
-      cp --no-preserve=mode $ARCHIVE/*.tar.gz build/
+      cp --no-preserve=mode \
+        $ARCHIVE/*.tar.gz \
+        $ARCHIVE/*.zip \
+        build/
     done
   '';
   installPhase = ''

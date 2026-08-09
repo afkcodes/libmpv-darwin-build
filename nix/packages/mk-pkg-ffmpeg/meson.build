@@ -122,6 +122,18 @@ audio_default_options = [
     '--enable-demuxer=avi',
     '--enable-demuxer=flac',
     '--enable-demuxer=flv',
+    # HLS. Note that `--enable-protocol=hls` below is NOT this: that is the
+    # deprecated `hls://` protocol and is useless without the demuxer. In
+    # ffmpeg 6.0 `hls_demuxer_select="adts_header ac3_parser mov_demuxer
+    # mpegts_demuxer"`, and every one of those is already satisfied by this
+    # list (the aac* decoders pull adts_header; ac3 parser, mov demuxer and
+    # the crypto protocol for AES-128 are all enabled above), so these two
+    # lines add the HLS and MPEG-TS demuxers and nothing else. No new external
+    # library, no GPL code: still LGPLv3 via --enable-version3.
+    # `video_default_options` has carried both since forever — only the audio
+    # flavour lacked them.
+    '--enable-demuxer=hls',
+    '--enable-demuxer=mpegts',
     '--enable-demuxer=matroska',
     '--enable-demuxer=mov',
     '--enable-demuxer=m4v',

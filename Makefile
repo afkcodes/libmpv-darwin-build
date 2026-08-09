@@ -8,9 +8,18 @@ XCODE_PATH ?=
 # Example: make VERSION=0.0.1
 VERSION ?=
 
-# Flake output attribute to build. If not set, the default package is built.
+# Flake output attribute to build. Set to empty to build the default package
+# (the full cross matrix).
 # Example: make TARGET=mk-out-archive-libs-macos-universal-video-default
-TARGET ?=
+#
+# This fork exists for exactly one artifact: the iOS `audio`/`default`
+# xcframeworks bundle that rn-media pins. Upstream's default target walks the
+# whole matrix (libs + xcframeworks, ios/macos, audio + video,
+# default/full/encodersgpl — roughly 40 archives), which is hours of macos-15
+# runner time producing 39 archives nobody here consumes, so the default is
+# narrowed. The release asset name is derived from the target's own
+# os/arch/variant/flavor and is therefore unchanged.
+TARGET ?= mk-out-archive-xcframeworks-ios-universal-audio-default
 
 all: build
 

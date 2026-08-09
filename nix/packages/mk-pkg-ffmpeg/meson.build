@@ -176,8 +176,78 @@ audio_default_options = [
     # '--enable-protocol=srt', # WARNING: Option --enable-protocol=srt did not match anything
 
     # filters
+    #
+    # Same trap as the demuxers above, one layer up: `--disable-all` makes this
+    # allow-list the whole world, and it held exactly two entries -- `overlay`
+    # (video) and `equalizer`. `--enable-avfilter` *is* in `common_options` and
+    # mpv's libavfilter bridge (filters/f_lavfi.c) *is* compiled, so
+    # `af=<name>=...` resolves through avfilter_get_by_name(); it simply had
+    # nothing to resolve to.
+    #
+    # `aresample` is the load-bearing one and is NOT optional:
+    # libavfilter/avfiltergraph.c:486-492 auto-inserts `neg->conversion_filter`
+    # (= "aresample" for audio) whenever two linked pads cannot agree a format,
+    # and if that filter is absent graph config fails outright with
+    # "'aresample' filter not present, cannot convert formats". Every filter
+    # below pins a *different* sample format -- superequalizer/firequalizer
+    # FLTP, anequalizer/dynaudnorm DBLP, loudnorm/crossfeed/acompressor/
+    # alimiter DBL (packed), biquads S16P|S32P|FLTP|DBLP -- and loudnorm also
+    # pins 192 kHz input in its non-linear mode. Its only configure dep is
+    # `aresample_filter_deps="swresample"` (configure:3630) and
+    # `--enable-swresample` is already in `common_options` -- checked, not
+    # assumed.
+    #
+    # Everything else here has NO `_deps`/`_select`/`_suggest` line in FFmpeg
+    # 6.0's configure (grepped `^<name>_filter_(deps|select|suggest)=` for each;
+    # aresample is the only hit), so each flag costs exactly its own object:
+    #   volume            af_volume.o          pre-amp / headroom before EQ boost
+    #   equalizer         af_biquads.o         (already enabled; kept)
+    #   bass treble       af_biquads.o         shelving; SAME object as equalizer,
+    #   lowpass highpass  af_biquads.o         so these four are registration-only
+    #                                          (libavfilter/Makefile:120,137,144,
+    #                                          149,166)
+    #   anequalizer       af_anequalizer.o     N-band parametric IIR, per-channel
+    #   superequalizer    af_superequalizer.o  18-band graphic EQ
+    #   firequalizer      af_firequalizer.o    linear-phase FIR EQ
+    #   acompressor       af_sidechaincompress.o
+    #   alimiter          af_alimiter.o        true-peak clip guard after EQ boost
+    #   dynaudnorm        af_dynaudnorm.o      cheap live loudness levelling
+    #   loudnorm          af_loudnorm.o + ebur128.o   EBU R128
+    #   crossfeed         af_crossfeed.o       headphone crossfeed
+    #   aformat anull     af_aformat.o/af_anull.o  format pinning + no-op
+    #
+    # superequalizer and firequalizer used to need libavcodec's RDFT; in 6.0
+    # both include "libavutil/tx.h" only (af_superequalizer.c:23,
+    # af_firequalizer.c:26), so they add no avcodec surface. None of these is
+    # darwin-specific in any way -- no VideoToolbox/AudioToolbox path, no extra
+    # external library, so `audio_common_options` is untouched.
+    #
+    # LICENSING -- this is the whole reason the list is not longer. FFmpeg gates
+    # GPL-only components with `<name>_filter_deps="gpl"`; in 6.0 all 34 such
+    # entries (configure:3636-3756) are *video* filters (eq, hqdn3d, delogo,
+    # spp, pp, pullup, ...). No audio filter carries a gpl dep. So: still no
+    # `--enable-gpl`/`--enable-nonfree`, `--enable-version3` -> LGPLv3.
+    #
+    # Mirrors afkcodes/libmpv-android-audio-build@v1.1.9-rnmedia.2 so the two
+    # platforms expose the same filter set to rn-media.
     '--enable-filter=overlay',
+    '--enable-filter=aresample',
+    '--enable-filter=aformat',
+    '--enable-filter=anull',
+    '--enable-filter=volume',
     '--enable-filter=equalizer',
+    '--enable-filter=bass',
+    '--enable-filter=treble',
+    '--enable-filter=lowpass',
+    '--enable-filter=highpass',
+    '--enable-filter=anequalizer',
+    '--enable-filter=superequalizer',
+    '--enable-filter=firequalizer',
+    '--enable-filter=acompressor',
+    '--enable-filter=alimiter',
+    '--enable-filter=dynaudnorm',
+    '--enable-filter=loudnorm',
+    '--enable-filter=crossfeed',
 ]
 
 # https://github.com/media-kit/libmpv-android-video-build/blob/7353af784df9bab3256acd8d90f208024d16ab96/buildscripts/flavors/default.sh

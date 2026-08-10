@@ -51,6 +51,10 @@ let
     if [ "${variant}" == "${variants.audio}" ]; then
       patch -p1 <${../../../patches/mpv-remove-libass.patch}
     fi
+    # rn-media: the PCM tap behind `Player.visualizer`. Applied for every
+    # variant — it is four files, no build-system files, and the same patch
+    # file the Android fork carries, so the two platforms stay one engine.
+    patch -p1 <${../../../patches/mpv-rn-media-pcm-tap.patch}
     cd -
 
     cp -r $src $out

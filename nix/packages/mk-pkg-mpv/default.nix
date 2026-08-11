@@ -28,22 +28,6 @@ let
   uchardet = callPackage ../mk-pkg-uchardet/default.nix { };
   libass = callPackage ../mk-pkg-libass/default.nix { };
 
-  # Export control -- the one thing the waf -> meson move silently took away,
-  # and which mpv 0.41 needs on Apple for the first time because libplacebo
-  # enters the link as a static archive. See ./mpv.exp.
-  #
-  # It has to ride in on a cross file rather than `-Dc_link_args=...`: meson
-  # replaces (never appends to) a built-in option given on the command line, so
-  # passing it would drop the `-arch/-isysroot/-m*-version-min` triple the
-  # cross file sets and silently produce an object for the wrong platform. All
-  # four link_args keys are extended because meson picks the linker driver from
-  # the highest-ranked language in the target, and libmpv has .m sources, so
-  # objc -- not c -- drives the final link.
-  mpvCrossFile = pkgs.runCommand "${pname}-cross-file-${os}-${arch}.ini" { } ''
-    sed -E "/^(c|cpp|objc|objcpp)_link_args/ s|\]$|, '-Wl,-exported_symbols_list,${./mpv.exp}']|" \
-      ${crossFile} > $out
-  '';
-
   nativeBuildInputs = [
     pkgs.meson
     pkgs.ninja
@@ -63,6 +47,20 @@ let
     chmod -R 777 $src
 
     cd $src
+    # Export control -- the one thing the waf -> meson move silently took away,
+    # and which mpv 0.41 needs on Apple for the first time because libplacebo
+    # enters the link as a static archive. See ./mpv.exp for the list itself.
+    #
+    # The flag is added to `library('mpv', ...)`'s own link_args by the patch
+    # below rather than to the cross file's `*_link_args`, and that distinction
+    # cost a CI run: meson feeds the built-in link args to every compiler check
+    # too, so an export list naming only `_mpv_*` made
+    # `dependency('appleframeworks', modules: ['Foundation', 'AudioToolbox'])`
+    # fail its link probe and took the AudioUnit AO out of the build
+    # ("Run-time dependency appleframeworks found: NO", CI run 31460332314).
+    # Scoping it to the one link that ships is both correct and narrower.
+    cp ${./mpv.exp} $src/rn-media-mpv.exp
+    patch -p1 <${../../../patches/mpv-rn-media-export-list.patch}
     patch -p1 <${../../../patches/mpv-fix-missing-objc.patch}
     patch -p1 <${../../../patches/mpv-audiounit-shared-session.patch}
     if [ "${variant}" == "${variants.audio}" ]; then
@@ -290,7 +288,7 @@ pkgs.stdenvNoCC.mkDerivation {
 
     meson setup build $src \
       --native-file ${nativeFile} \
-      --cross-file ${mpvCrossFile} \
+      --cross-file ${crossFile} \
       --prefix=$out \
       "''${OPTIONS[@]}" |
       tee configure.log

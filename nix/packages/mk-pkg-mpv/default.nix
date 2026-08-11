@@ -46,6 +46,20 @@ let
     export src=$PWD/src
     chmod -R 777 $src
 
+    # rn-media parity release, item 5. Two flags, on EVERY patch in the series.
+    #
+    # --fuzz=0 is ARCHITECTURE.md 11: GNU patch defaults to --fuzz=2, and a
+    # patch that applies with fuzz applies QUIETLY WRONG -- it will happily
+    # land a hunk in the wrong place on an already-fixed tree and report
+    # success. Only the prefetch-hook line passed it before; the rest of the
+    # series ran at the default. git apply (which the Android fork uses) has no
+    # fuzz at all, so this is also what makes the two forks apply the same
+    # patches under the same rules.
+    #
+    # --no-backup-if-mismatch stops patch from dropping .orig files into the
+    # source tree, which would otherwise end up copied into $out.
+    patchflags="--fuzz=0 --no-backup-if-mismatch"
+
     cd $src
     # Export control -- the one thing the waf -> meson move silently took away,
     # and which mpv 0.41 needs on Apple for the first time because libplacebo
@@ -60,16 +74,16 @@ let
     # ("Run-time dependency appleframeworks found: NO", CI run 31460332314).
     # Scoping it to the one link that ships is both correct and narrower.
     cp ${./mpv.exp} $src/rn-media-mpv.exp
-    patch -p1 <${../../../patches/mpv-rn-media-export-list.patch}
-    patch -p1 <${../../../patches/mpv-fix-missing-objc.patch}
-    patch -p1 <${../../../patches/mpv-audiounit-shared-session.patch}
+    patch -p1 $patchflags <${../../../patches/mpv-rn-media-export-list.patch}
+    patch -p1 $patchflags <${../../../patches/mpv-fix-missing-objc.patch}
+    patch -p1 $patchflags <${../../../patches/mpv-audiounit-shared-session.patch}
     if [ "${variant}" == "${variants.audio}" ]; then
-      patch -p1 <${../../../patches/mpv-remove-libass.patch}
+      patch -p1 $patchflags <${../../../patches/mpv-remove-libass.patch}
     fi
     # rn-media: the PCM tap behind `Player.visualizer`. Applied for every
     # variant — it is four files, no build-system files, and the same patch
     # file the Android fork carries, so the two platforms stay one engine.
-    patch -p1 <${../../../patches/mpv-rn-media-pcm-tap.patch}
+    patch -p1 $patchflags <${../../../patches/mpv-rn-media-pcm-tap.patch}
     # rn-media: the `on_prefetch_load` client hook + the read-only
     # `prefetch-playlist-entry-id` property. mpv's --prefetch-playlist opens the
     # next entry's RAW filename (prefetch_next() calls start_open() directly and
@@ -89,11 +103,7 @@ let
     # sync --check lands in this repo's CI, identity with the Android copy is
     # discipline, not enforcement -- sync from the workshop, never edit here.
     #
-    # --fuzz=0 per ARCHITECTURE.md 11: a patch that applies with fuzz applies
-    # QUIETLY WRONG. The lines above still run at GNU patch's default fuzz 2;
-    # fixing that for the whole series is tracked separately (#32) and is
-    # deliberately not folded into this commit.
-    patch -p1 --fuzz=0 <${../../../patches/mpv-rn-media-prefetch-hook.patch}
+    patch -p1 $patchflags <${../../../patches/mpv-rn-media-prefetch-hook.patch}
     cd -
 
     cp -r $src $out
@@ -251,8 +261,27 @@ pkgs.stdenvNoCC.mkDerivation {
       -Dlibmpv=true `# libmpv library`
       -Dbuild-date=true `# whether to include binary compile time`
 
-      `# misc features`
-      -Diconv=enabled `# iconv`
+      `# rn-media parity release, item 7: iconv is now DISABLED here, matching`
+      `# Android, which cannot have it. Decided on evidence, not preference:`
+      `#`
+      `#   * Android builds at API level 21 (buildscripts/build.sh) and bionic`
+      `#     only gained iconv(3) at API 28, so -Diconv=enabled there fails the`
+      `#     meson check outright. Getting it would mean raising minSdk to 28 --`
+      `#     dropping Android 5 through 8 -- or vendoring GNU libiconv as a new`
+      `#     engine dependency. Both are product decisions, not build fixes.`
+      `#   * What it costs here is smaller than it looks. mpv reaches iconv`
+      `#     through mp_charset_guess()/mp_iconv_to_utf8() for metadata, ICY`
+      `#     stream titles, CUE sheets and playlists -- but only when a charset`
+      `#     is actually named. --metadata-codepage defaults to empty, in which`
+      `#     case mp_iconv_to_utf8() returns the buffer untouched even WITH`
+      `#     iconv present, and "auto" needs uchardet, which both forks disable.`
+      `#     So with today's options this was inert on iOS.`
+      `#`
+      `# THE LOSS, stated exactly: rn-media can no longer set`
+      `# --metadata-codepage=<explicit charset> and have it applied on iOS. It`
+      `# could not do so on Android either, which is the point. To restore it on`
+      `# BOTH, vendor libiconv (or raise Android's minSdk to 28) and flip this`
+      `# back -- tracked in rn-media task #32.`
     )
 
     COMMON_VIDEO_OPTIONS=(

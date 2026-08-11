@@ -56,8 +56,17 @@ common_options = [
     '--enable-swscale',
     '--enable-avfilter',
 
-    # '--enable-gpl', # uncomment it to include GPL code
-    # '--enable-nonfree', # uncomment it to include unredistributable code
+    # rn-media parity release: ASSERT the licence, do not merely omit the flag.
+    # These two lines used to be commented-out invitations to enable GPL. The
+    # outcome was the same as Android's only by omission, and a grep for
+    # --disable-gpl found one fork and not the other. It also left the live
+    # `encodersgpl` flavour (which really does pass --enable-gpl and link
+    # libx264) one edit away from the default build. Now the audio/default
+    # configure line says what it means, and `workshop verify-artifacts` can
+    # assert --disable-gpl against FFmpeg's embedded configure string in the
+    # shipped binary rather than against a flag list.
+    '--disable-gpl',
+    '--disable-nonfree',
 ]
 
 audio_common_options = [
@@ -100,6 +109,34 @@ audio_default_options = [
     '--enable-decoder=pcm*',
     '--enable-decoder=dsd*',
     '--enable-decoder=dca', # required by dts
+
+    # rn-media parity release, item 1: COVER ART.
+    # Embedded album art is decoded by these. Android's audio flavour has
+    # enabled them since forever and this one enabled NONE, so art that
+    # rendered on Android silently failed on iOS -- a parity gap under
+    # CLAUDE.md, not a size trade-off. Mirrors
+    # afkcodes/libmpv-android-audio-build buildscripts/scripts/ffmpeg.sh.
+    #
+    # EIGHT, not nine: Android also passes --enable-decoder=ljpeg, which
+    # matches NOTHING in any FFmpeg (ljpeg is an encoder only; mjpeg decodes
+    # it). That dead flag is being removed from Android in this same release
+    # rather than propagated here.
+    '--enable-decoder=bmp',
+    '--enable-decoder=gif',
+    '--enable-decoder=jpeg2000',
+    '--enable-decoder=jpegls',
+    '--enable-decoder=mjpeg',
+    '--enable-decoder=png',
+    '--enable-decoder=tiff',
+    '--enable-decoder=webp',
+
+    # rn-media parity release, item 2: TrueHD / DTS-HD.
+    # This flavour already had --enable-demuxer=truehd and --enable-decoder=dca
+    # but neither the truehd DECODER nor the dtshd demuxer, so a .thd file
+    # demuxed and then failed to decode while the same file played on Android.
+    # Provenance of the Android side: upstream commit eb0af4e.
+    '--enable-decoder=truehd',
+    '--enable-demuxer=dtshd',
 
     # parsers   
     '--enable-parser=aac*',
@@ -166,7 +203,11 @@ audio_default_options = [
     '--enable-protocol=ffrtmphttp',
     '--enable-protocol=file',
     '--enable-protocol=ftp',
-    '--enable-protocol=hls',
+    # REMOVED in this release: '--enable-protocol=hls'. FFmpeg 8.x deleted the
+    # deprecated `hls://` protocol, so the flag matched nothing and configure
+    # said so ("Option --enable-protocol=hls did not match anything"). HLS is
+    # carried by the DEMUXER above, which is why it kept working. Dead flags are
+    # being dropped on both forks in this release rather than carried forward.
     '--enable-protocol=http',
     '--enable-protocol=httpproxy',
     '--enable-protocol=https',

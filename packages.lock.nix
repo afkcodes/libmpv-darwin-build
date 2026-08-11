@@ -145,15 +145,35 @@
     url = "https://code.videolan.org/videolan/x264/-/archive/a8b68ebfaa68621b5ac8907610d3335971839d52/libx264-a8b68ebfaa68621b5ac8907610d3335971839d52.tar.gz";
     sha256 = "164688b63f11a6e4f6d945057fc5c57d5eefb97973d0029fb0303744e10839ff";
   };
+  # rn-media parity release, item 4. 2.11.5 -> 2.15.3, aligned with the Android
+  # fork, which moves 2.10.3 -> 2.15.3 in the same release. The two were one
+  # release line apart in opposite directions and neither number was a decision.
+  # 2.15.3 is the current stable, resolved from gitlab.gnome.org's tag list.
+  # It still ships autotools (autogen.sh + configure.ac), which both forks'
+  # builds need -- checked against the 2.15.3 tree, not assumed.
   libxml2 = {
-    version = "2.11.5";
-    url = "https://download.gnome.org/sources/libxml2/2.11/libxml2-2.11.5.tar.xz";
-    sha256 = "3727b078c360ec69fa869de14bd6f75d7ee8d36987b071e6928d4720a28df3a6";
+    version = "2.15.3";
+    url = "https://download.gnome.org/sources/libxml2/2.15/libxml2-2.15.3.tar.xz";
+    sha256 = "78262a6e7ac170d6528ebfe2efccdf220191a5af6a6cd61ea4a9a9a5042c7a07";
   };
+  # rn-media parity release, item 3. 3.4.1 -> 3.6.7, aligning with the Android
+  # fork on the 3.6 LTS line. This is the library that terminates every HTTPS and
+  # HLS connection, and iOS was two minor versions behind Android on it for no
+  # reason anyone had decided -- the skew was inherited, not chosen.
+  #
+  # 3.6.7 is the current 3.6 LTS point release (2026-07-07), resolved from the
+  # Mbed-TLS releases API, not from memory.
+  #
+  # The URL moves from the GitHub /archive/ snapshot to the official RELEASE
+  # tarball on purpose: from 3.6 on, a bare source snapshot needs
+  # scripts/make_generated_files.py (and Python + jinja2) run before it will
+  # build, while the release tarball ships those generated files. The build here
+  # is a CMake subproject with no generation step, so the release tarball is the
+  # only one of the two that actually builds.
   mbedtls = {
-    version = "3.4.1";
-    url = "https://github.com/Mbed-TLS/mbedtls/archive/refs/tags/v3.4.1.tar.gz";
-    sha256 = "a420fcf7103e54e775c383e3751729b8fb2dcd087f6165befd13f28315f754f5";
+    version = "3.6.7";
+    url = "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2";
+    sha256 = "a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6";
   };
   mpv = {
     version = "0.41.0";

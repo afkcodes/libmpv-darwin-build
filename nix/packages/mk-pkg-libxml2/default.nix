@@ -24,7 +24,10 @@ let
     chmod -R 777 $src
 
     cd $src
-    patch -p1 <${../../../patches/ltmain-target-passthrough.patch}
+    # rn-media parity release, item 5: --fuzz=0 (ARCHITECTURE.md 11 -- a patch
+    # that applies with fuzz applies quietly wrong) and --no-backup-if-mismatch
+    # so no .orig files are left in the tree.
+    patch -p1 --fuzz=0 --no-backup-if-mismatch <${../../../patches/ltmain-target-passthrough.patch}
     cd -
 
     cp ${./meson.build} $src/meson.build

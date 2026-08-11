@@ -1,1290 +1,1741 @@
+rn-media: remove libass from the mpv 0.41.0 build (audio-only libmpv)
+
+WHY THIS EXISTS
+    mpv 0.41's meson.build has an unconditional
+        libass = dependency('libass', version: '>= 0.12.2')
+    and offers no switch to turn it off.  sub/osd_dummy.c — the stub OSD
+    backend that let older mpv build without libass — was deleted upstream,
+    so every mpv >= 0.37 drags in libass and, transitively, freetype +
+    fribidi + harfbuzz.
+
+    Our Android/iOS libmpv is audio-only: vid=no, vo=null, sid=no, and no
+    OSD is ever rendered.  Not one glyph is drawn, yet those four libraries
+    cost roughly 1-2 MB per ABI on a ~6.4 MB binary.  This patch removes
+    them from the link.
+
+    It replaces our old 003.mpv_remove_libass.patch, which was written for
+    mpv 0.35.1 and cannot be rebased: it edits wscript and
+    wscript_build.py, both deleted when mpv dropped waf in 0.37, plus 0.35's
+    sub/ tree layout.
+
+PROVENANCE
+    The removal was mapped out by ales-drnz/libmpv-scripts (BSD-3-Clause),
+    in patches/mpv/shared/patch_strip_libass.py — a Python script that
+    performs this exact surgery on a 0.41.0 tree.  We credit the same author
+    for the PCM tap (004).  Their symbol analysis was independently
+    re-verified against pristine v0.41.0 and found complete; this patch is
+    the same removal expressed as a static .patch, because our build applies
+    patches with `git apply`, not Python.
+
+    Two deliberate differences from the prior art:
+
+      * It stubs osd_mangle_ass(), osd_get_function_sym(), sd_ass_pkt_text()
+        and sd_ass_to_plaintext() as no-ops.  None of those four calls
+        libass — they are pure string handling — and osd_mangle_ass() is
+        reachable from the client API as the `escape-ass` command, which
+        would silently start returning "".  We reproduce all four verbatim.
+
+      * Its osd_get_text_size() returns 0/0.  Its caller,
+        player/command.c:cut_osd_list(), computes
+        screen_h / MPMAX(font_h, 1) and then subtracts 1 for the header, so
+        0/0 yields max_lines == -1 and truncates OSD lists to nothing.  We
+        return 720/30, i.e. the same 24 lines that the terminal branch of
+        that very function defaults to.
+
+WHAT IT DOES
+    meson.build
+        drops the `libass = dependency(...)` line and the now-stale comment
+        about libass-before-ffmpeg link ordering; removes libass from the
+        `dependencies` array and 'libass' from the `features` dict; drops
+        sub/ass_mp.c, sub/osd_libass.c and sub/sd_ass.c from `sources` and
+        adds sub/stub_libass.c in their place.
+
+    deletes  sub/ass_mp.c, sub/ass_mp.h, sub/osd_libass.c, sub/sd_ass.c
+        Those are the only files in 0.41.0 that touch libass.  ass_mp.h is
+        included by nothing else once they are gone.
+
+    adds  sub/stub_libass.c
+        One translation unit defining every non-static symbol from the
+        deleted files that surviving code still references — twelve of them,
+        no more and no fewer.  Verbatim copies where the original has no
+        libass in it (the whole sub-filter option group, which the option
+        subsystem walks at mpv_create() time, and the ASS event string
+        helpers the subtitle filters call); no-ops or failures only where
+        the original genuinely needs an ASS_Renderer or ASS_Track.  Each
+        symbol carries a comment naming its caller.
+
+    player/command.c
+        drops `#include <ass/ass.h>` (header gone) and makes the
+        `libass-version` property report 0 instead of calling
+        ass_library_version() (symbol gone).  Two one-line hunks, both far
+        from the audio-property region that 004 edits.
+
+    Not touched: sub/meson.build still generates sub/osd_font.otf.inc.  Only
+    the deleted osd_libass.c ever included it, so it costs a few KB of build
+    time and zero bytes of binary; leaving it keeps the patch surface small.
+
+VERIFIED
+    Configured and built to completion on Linux/x86-64 against the host's
+    ffmpeg and libplacebo:
+        meson setup build -Dlibmpv=true -Dcplayer=false -Dgpl=false \
+              --default-library shared && ninja -C build
+    libmpv.so links with no libass/freetype/fribidi/harfbuzz in DT_NEEDED
+    and no undefined ass_* symbols.  A smoke program against the built
+    library confirms mpv_create()+mpv_initialize() succeed, the
+    sub-filter-sdh* options parse, `libass-version` reads 0, `escape-ass`
+    returns byte-identical output to upstream's algorithm, and
+    `osd-overlay` with compute-bounds succeeds and reports no bounds.
+    Cross-compiled Android/iOS builds are NOT covered by this run.
+
+REBASING
+    Small patch, but every hunk is an anchor.  After an mpv bump re-check:
+      meson.build            the `libass = dependency(...)` line, the
+                             `dependencies = [...]` array, the `features`
+                             dict, and the `## Subtitles` block of
+                             `sources = files(...)`
+      sub/                   whether ass_mp.c/.h, osd_libass.c, sd_ass.c are
+                             still the complete set of libass-only files:
+                               grep -rn 'ass/ass\.h' --include='*.[ch]' .
+                             must report exactly those plus player/command.c
+      sub/stub_libass.c      the twelve symbols, against their declarations
+                             in sub/osd.h, sub/osd_state.h and sub/sd.h.  A
+                             signature that drifts is a link error at best.
+                             Re-diff the verbatim bodies against the deleted
+                             originals: mp_sub_filter_opts (vs sd_ass.c),
+                             sd_ass_fmt_offset / sd_ass_pkt_text /
+                             sd_ass_to_plaintext + its static
+                             ass_to_plaintext()/append() (vs sd_ass.c),
+                             osd_get_function_sym / osd_mangle_ass and the
+                             ASS_USE_OSD_FONT macro (vs osd_libass.c)
+      player/command.c       the `#include <ass/ass.h>` line and
+                             mp_property_libass_version()
+    If upstream ever restores a real build switch for libass, delete this
+    patch entirely and set that option instead.
+
 diff --git a/meson.build b/meson.build
-index f9fe4e7..a3d55c4 100644
+index fb10be5..bfd0872 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -23,13 +23,11 @@ libavutil = dependency('libavutil', version: '>= 56.70.100')
- libswresample = dependency('libswresample', version: '>= 3.9.100')
- libswscale = dependency('libswscale', version: '>= 5.9.100')
+@@ -29,12 +29,11 @@ libswscale = dependency('libswscale', version: '>= 7.5.100')
+ libplacebo = dependency('libplacebo', version: '>=6.338.2',
+                 default_options: ['default_library=static', 'demos=false'])
  
 -libass = dependency('libass', version: '>= 0.12.2')
- pthreads = dependency('threads')
- 
+-
 -# the dependency order of libass -> ffmpeg is necessary due to
-+# the dependency order of libavcodec -> ffmpeg is necessary due to
- # static linking symbol resolution between fontconfig and MinGW
+-# static linking symbol resolution between fontconfig and MinGW
 -dependencies = [libass,
 -                libavcodec,
++# libass is deliberately not a dependency of this build: see
++# sub/stub_libass.c. (Upstream ordered libass before ffmpeg here because of
++# fontconfig/MinGW static symbol resolution; with libass gone that
++# constraint is moot.)
 +dependencies = [libavcodec,
                  libavfilter,
                  libavformat,
                  libavutil,
-@@ -44,7 +42,7 @@ features = {
+@@ -47,7 +46,6 @@ features = {
+     'debug': get_option('debug'),
+     'ffmpeg': true,
      'gpl': get_option('gpl'),
-     'jpegxl': libavformat.version().version_compare('>= 59.27.100'),
-     'avif_muxer': libavformat.version().version_compare('>= 59.24.100'),
 -    'libass': true,
-+    'libass': false,
-     'threads': true,
+     'libplacebo': true,
  }
  
+@@ -195,16 +193,14 @@ sources = files(
+     'stream/stream_slice.c',
+ 
+     ## Subtitles
+-    'sub/ass_mp.c',
+     'sub/dec_sub.c',
+     'sub/draw_bmp.c',
+     'sub/filter_sdh.c',
+     'sub/img_convert.c',
+     'sub/lavc_conv.c',
+     'sub/osd.c',
+-    'sub/osd_libass.c',
+-    'sub/sd_ass.c',
+     'sub/sd_lavc.c',
++    'sub/stub_libass.c',
+ 
+     ## Video
+     'video/csputils.c',
 diff --git a/player/command.c b/player/command.c
-index 0eb13a7..f7a17c8 100644
+index 96bc06a..ebd6c37 100644
 --- a/player/command.c
 +++ b/player/command.c
-@@ -27,7 +27,7 @@
- #include <pthread.h>
+@@ -25,7 +25,8 @@
+ #include <math.h>
  #include <sys/types.h>
  
 -#include <ass/ass.h>
-+// #include <ass/ass.h>
++// libass is stripped from this build (see sub/stub_libass.c); <ass/ass.h>
++// is not available and ass_library_version() does not link.
  #include <libavutil/avstring.h>
  #include <libavutil/common.h>
- 
-@@ -3310,7 +3310,8 @@ static int mp_property_ffmpeg(void *ctx, struct m_property *prop,
+ #include <libavutil/timecode.h>
+@@ -3754,7 +3755,8 @@ static int mp_property_ffmpeg(void *ctx, struct m_property *prop,
  static int mp_property_libass_version(void *ctx, struct m_property *prop,
                                        int action, void *arg)
  {
 -    return m_property_int64_ro(action, arg, ass_library_version());
-+    // return m_property_int64_ro(action, arg, ass_library_version());
++    // libass stripped from this build: report 0 rather than a fake version.
 +    return m_property_int64_ro(action, arg, 0);
  }
  
  static int mp_property_platform(void *ctx, struct m_property *prop,
-diff --git a/sub/ass.h b/sub/ass.h
-new file mode 100644
-index 0000000..05d97fb
---- /dev/null
-+++ b/sub/ass.h
-@@ -0,0 +1,812 @@
-+/*
-+ * Copyright (C) 2006 Evgeniy Stepanov <eugeni.stepanov@gmail.com>
-+ * Copyright (C) 2011 Grigori Goronzy <greg@chown.ath.cx>
-+ *
-+ * This file is part of libass.
-+ *
-+ * Permission to use, copy, modify, and distribute this software for any
-+ * purpose with or without fee is hereby granted, provided that the above
-+ * copyright notice and this permission notice appear in all copies.
-+ *
-+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
-+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
-+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-+ */
-+
-+#ifndef LIBASS_ASS_H
-+#define LIBASS_ASS_H
-+
-+#include <stdio.h>
-+#include <stdarg.h>
-+#include "ass_types.h"
-+
-+#define LIBASS_VERSION 0x01701000
-+
-+#ifdef __cplusplus
-+extern "C" {
-+#endif
-+
-+#if (defined(__GNUC__) && ((__GNUC__ > 3) || (__GNUC__ == 3 && __GNUC_MINOR__ >= 1))) || defined(__clang__)
-+    #if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 5) || defined(__clang__)
-+        #define ASS_DEPRECATED(msg) __attribute__((deprecated(msg)))
-+    #else
-+        #define ASS_DEPRECATED(msg) __attribute__((deprecated))
-+    #endif
-+    #if __GNUC__ > 5 || defined(__clang__)
-+        #define ASS_DEPRECATED_ENUM(msg) __attribute__((deprecated(msg)))
-+    #else
-+        #define ASS_DEPRECATED_ENUM(msg)
-+    #endif
-+#elif defined(_MSC_VER)
-+    #define ASS_DEPRECATED(msg) __declspec(deprecated(msg))
-+    #define ASS_DEPRECATED_ENUM(msg)
-+#else
-+    #define ASS_DEPRECATED(msg)
-+    #define ASS_DEPRECATED_ENUM(msg)
-+#endif
-+
-+
-+/*
-+ * A linked list of images produced by an ass renderer.
-+ *
-+ * These images have to be rendered in-order for the correct screen
-+ * composition.  The libass renderer clips these bitmaps to the frame size.
-+ * w/h can be zero, in this case the bitmap should not be rendered at all.
-+ * The last bitmap row is not guaranteed to be padded up to stride size,
-+ * e.g. in the worst case a bitmap has the size stride * (h - 1) + w.
-+ */
-+typedef struct ass_image {
-+    int w, h;                   // Bitmap width/height
-+    int stride;                 // Bitmap stride
-+    unsigned char *bitmap;      // 1bpp stride*h alpha buffer
-+                                // Note: the last row may not be padded to
-+                                // bitmap stride!
-+    uint32_t color;             // Bitmap color and alpha, RGBA
-+                                // For full VSFilter compatibility, the value
-+                                // must be transformed as described in
-+                                // ass_types.h for ASS_YCbCrMatrix
-+    int dst_x, dst_y;           // Bitmap placement inside the video frame
-+
-+    struct ass_image *next;   // Next image, or NULL
-+
-+    enum {
-+        IMAGE_TYPE_CHARACTER,
-+        IMAGE_TYPE_OUTLINE,
-+        IMAGE_TYPE_SHADOW
-+    } type;
-+
-+    // New fields can be added here in new ABI-compatible library releases.
-+} ASS_Image;
-+
-+/*
-+ * Hinting type. (see ass_set_hinting below)
-+ *
-+ * Setting hinting to anything but ASS_HINTING_NONE will put libass in a mode
-+ * that reduces compatibility with vsfilter and many ASS scripts. The main
-+ * problem is that hinting conflicts with smooth scaling, which precludes
-+ * animations and precise positioning.
-+ *
-+ * In other words, enabling hinting might break some scripts severely.
-+ *
-+ * FreeType's native hinter is still buggy sometimes and it is recommended
-+ * to use the light autohinter, ASS_HINTING_LIGHT, instead.  For best
-+ * compatibility with problematic fonts, disable hinting.
-+ */
-+typedef enum {
-+    ASS_HINTING_NONE = 0,
-+    ASS_HINTING_LIGHT,
-+    ASS_HINTING_NORMAL,
-+    ASS_HINTING_NATIVE
-+} ASS_Hinting;
-+
-+/**
-+ * \brief Text shaping levels.
-+ *
-+ * SIMPLE is a fast, font-agnostic shaper that can do only substitutions.
-+ * COMPLEX is a slower shaper using OpenType for substitutions and positioning.
-+ *
-+ * libass uses the best shaper available by default.
-+ */
-+typedef enum {
-+    ASS_SHAPING_SIMPLE = 0,
-+    ASS_SHAPING_COMPLEX
-+} ASS_ShapingLevel;
-+
-+/**
-+ * \brief Style override options. See
-+ * ass_set_selective_style_override_enabled() for details.
-+ */
-+typedef enum {
-+    /**
-+     * Default mode (with no other bits set). All selective override features
-+     * as well as the style set with ass_set_selective_style_override() are
-+     * disabled, but traditional overrides like ass_set_font_scale() are
-+     * applied unconditionally.
-+     */
-+    ASS_OVERRIDE_DEFAULT = 0,
-+    /**
-+     * Apply the style as set with ass_set_selective_style_override() on events
-+     * which look like dialogue. Other style overrides are also applied this
-+     * way, except ass_set_font_scale(). How ass_set_font_scale() is applied
-+     * depends on the ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE flag.
-+     *
-+     * This is equivalent to setting all of the following bits:
-+     *
-+     * ASS_OVERRIDE_BIT_FONT_NAME
-+     * ASS_OVERRIDE_BIT_FONT_SIZE_FIELDS
-+     * ASS_OVERRIDE_BIT_COLORS
-+     * ASS_OVERRIDE_BIT_BORDER
-+     * ASS_OVERRIDE_BIT_ATTRIBUTES
-+     */
-+    ASS_OVERRIDE_BIT_STYLE = 1 << 0,
-+    /**
-+     * Apply ass_set_font_scale() only on events which look like dialogue.
-+     * If not set, the font scale is applied to all events. (The behavior and
-+     * name of this flag are unintuitive, but exist for compatibility)
-+     */
-+    ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE = 1 << 1,
-+    /**
-+     * Old alias for ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE. Deprecated. Do not use.
-+     */
-+    ASS_OVERRIDE_BIT_FONT_SIZE ASS_DEPRECATED_ENUM("replaced by ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE") = 1 << 1,
-+    /**
-+     * On dialogue events override: FontSize, Spacing, Blur, ScaleX, ScaleY
-+     */
-+    ASS_OVERRIDE_BIT_FONT_SIZE_FIELDS = 1 << 2,
-+    /**
-+     * On dialogue events override: FontName, treat_fontname_as_pattern
-+     */
-+    ASS_OVERRIDE_BIT_FONT_NAME = 1 << 3,
-+    /**
-+     * On dialogue events override: PrimaryColour, SecondaryColour, OutlineColour, BackColour
-+     */
-+    ASS_OVERRIDE_BIT_COLORS = 1 << 4,
-+    /**
-+     * On dialogue events override: Bold, Italic, Underline, StrikeOut
-+     */
-+    ASS_OVERRIDE_BIT_ATTRIBUTES = 1 << 5,
-+    /**
-+     * On dialogue events override: BorderStyle, Outline, Shadow
-+     */
-+    ASS_OVERRIDE_BIT_BORDER = 1 << 6,
-+    /**
-+     * On dialogue events override: Alignment
-+     */
-+    ASS_OVERRIDE_BIT_ALIGNMENT = 1 << 7,
-+    /**
-+     * On dialogue events override: MarginL, MarginR, MarginV
-+     */
-+    ASS_OVERRIDE_BIT_MARGINS = 1 << 8,
-+    /**
-+     * Unconditionally replace all fields of all styles with the one provided
-+     * with ass_set_selective_style_override().
-+     * Does not apply ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE.
-+     * Add ASS_OVERRIDE_BIT_FONT_SIZE_FIELDS and ASS_OVERRIDE_BIT_BORDER if
-+     * you want FontSize, Spacing, Outline, Shadow to be scaled to the script
-+     * resolution given by the ASS_Track.
-+     */
-+    ASS_OVERRIDE_FULL_STYLE = 1 << 9,
-+    /**
-+     * On dialogue events override: Justify
-+     */
-+    ASS_OVERRIDE_BIT_JUSTIFY = 1 << 10,
-+    // New enum values can be added here in new ABI-compatible library releases.
-+} ASS_OverrideBits;
-+
-+/**
-+ * \brief Return the version of library. This returns the value LIBASS_VERSION
-+ * was set to when the library was compiled.
-+ * \return library version
-+ */
-+int ass_library_version(void);
-+
-+/**
-+ * \brief Default Font provider to load fonts in libass' database
-+ *
-+ * NONE don't use any default font provider for font lookup
-+ * AUTODETECT use the first available font provider
-+ * CORETEXT force a CoreText based font provider (OS X only)
-+ * DIRECTWRITE force a DirectWrite based font provider (Microsoft Win32 only)
-+ * FONTCONFIG force a Fontconfig based font provider
-+ *
-+ * libass uses the best shaper available by default.
-+ */
-+typedef enum {
-+    ASS_FONTPROVIDER_NONE       = 0,
-+    ASS_FONTPROVIDER_AUTODETECT = 1,
-+    ASS_FONTPROVIDER_CORETEXT,
-+    ASS_FONTPROVIDER_FONTCONFIG,
-+    ASS_FONTPROVIDER_DIRECTWRITE,
-+} ASS_DefaultFontProvider;
-+
-+typedef enum {
-+    /**
-+     * Enable libass extensions that would display ASS subtitles incorrectly.
-+     * These may be useful for applications, which use libass as renderer for
-+     * subtitles converted from another format, or which use libass for other
-+     * purposes that do not involve actual ASS subtitles authored for
-+     * distribution.
-+     */
-+    ASS_FEATURE_INCOMPATIBLE_EXTENSIONS,
-+
-+    /**
-+     * Match bracket pairs in bidirectional text according to the revised
-+     * Unicode Bidirectional Algorithm introduced in Unicode 6.3.
-+     * This is incompatible with VSFilter and disabled by default.
-+     *
-+     * (Directional isolates, also introduced in Unicode 6.3,
-+     * are unconditionally processed when FriBidi is new enough.)
-+     *
-+     * This feature may be unavailable at runtime (ass_track_set_feature
-+     * may return -1) if libass was compiled against old FriBidi.
-+     */
-+    ASS_FEATURE_BIDI_BRACKETS,
-+
-+    /**
-+     * When this feature is disabled, text is split into VSFilter-compatible
-+     * segments and text in each segment is processed in isolation.
-+     * Notably, this includes running the Unicode Bidirectional
-+     * Algorithm and shaping the text within each run separately.
-+     * The individual runs are then laid out left-to-right,
-+     * even if they contain right-to-left text.
-+     *
-+     * When this feature is enabled, each event's text is processed as a whole
-+     * (as far as possible). In particular, the Unicode Bidirectional
-+     * Algorithm is run on the whole text, and text is shaped across
-+     * override tags.
-+     *
-+     * This is incompatible with VSFilter and disabled by default.
-+     *
-+     * libass extensions to ASS such as Encoding -1 can cause individual
-+     * events to be always processed as if this feature is enabled.
-+     */
-+    ASS_FEATURE_WHOLE_TEXT_LAYOUT,
-+
-+    /**
-+     * Break lines according to the Unicode Line Breaking Algorithm.
-+     * If the track language is set, some additional language-specific tweaks
-+     * may be applied. Setting this enables more breaking opportunities
-+     * compared to classic ASS. However, it is still possible for long words
-+     * without breaking opportunities to cause overfull lines.
-+     * This is incompatible with VSFilter and disabled by default.
-+     *
-+     * This feature may be unavailable at runtime if
-+     * libass was compiled without libunibreak support.
-+     */
-+    ASS_FEATURE_WRAP_UNICODE,
-+
-+    // New enum values can be added here in new ABI-compatible library releases.
-+} ASS_Feature;
-+
-+/**
-+ * \brief Initialize the library.
-+ * \return library handle or NULL if failed
-+ */
-+ASS_Library *ass_library_init(void);
-+
-+/**
-+ * \brief Finalize the library
-+ * \param priv library handle
-+ */
-+void ass_library_done(ASS_Library *priv);
-+
-+/**
-+ * \brief Set additional fonts directory.
-+ * Optional directory that will be scanned for fonts.  The fonts
-+ * found are used for font lookup.
-+ * NOTE: A valid font directory is not needed to support embedded fonts.
-+ * On Microsoft Windows, when using WIN32-APIs, fonts_dir must be in either
-+ * UTF-8 mixed with lone or paired UTF-16 surrogates encoded like in CESU-8
-+ * or the encoding accepted by fopen with the former taking precedence
-+ * if both versions are valid and exist.
-+ * On all other systems there is no need for special considerations like that.
-+ *
-+ * \param priv library handle
-+ * \param fonts_dir directory with additional fonts
-+ */
-+void ass_set_fonts_dir(ASS_Library *priv, const char *fonts_dir);
-+
-+/**
-+ * \brief Whether fonts should be extracted from track data.
-+ * \param priv library handle
-+ * \param extract whether to extract fonts
-+ */
-+void ass_set_extract_fonts(ASS_Library *priv, int extract);
-+
-+/**
-+ * \brief Register style overrides with a library instance.
-+ * The overrides should have the form [Style.]Param=Value, e.g.
-+ *   SomeStyle.Font=Arial
-+ *   ScaledBorderAndShadow=yes
-+ *
-+ * \param priv library handle
-+ * \param list NULL-terminated list of strings
-+ */
-+void ass_set_style_overrides(ASS_Library *priv, char **list);
-+
-+/**
-+ * \brief Explicitly process style overrides for a track.
-+ * \param track track handle
-+ */
-+void ass_process_force_style(ASS_Track *track);
-+
-+/**
-+ * \brief Register a callback for debug/info messages.
-+ * If a callback is registered, it is called for every message emitted by
-+ * libass.  The callback receives a format string and a list of arguments,
-+ * to be used for the printf family of functions. Additionally, a log level
-+ * from 0 (FATAL errors) to 7 (verbose DEBUG) is passed.  Usually, level 5
-+ * should be used by applications.
-+ * If no callback is set, all messages level < 5 are printed to stderr,
-+ * prefixed with [ass].
-+ *
-+ * \param priv library handle
-+ * \param msg_cb pointer to callback function
-+ * \param data additional data, will be passed to callback
-+ */
-+void ass_set_message_cb(ASS_Library *priv, void (*msg_cb)
-+                        (int level, const char *fmt, va_list args, void *data),
-+                        void *data);
-+
-+/**
-+ * \brief Initialize the renderer.
-+ * \param priv library handle
-+ * \return renderer handle or NULL if failed
-+ *
-+ * NOTE: before rendering starts the renderer should also be
-+ *       configured with at least ass_set_storage_size(),
-+ *       ass_set_frame_size() and ass_set_fonts();
-+ *       see respective docs.
-+ */
-+ASS_Renderer *ass_renderer_init(ASS_Library *);
-+
-+/**
-+ * \brief Finalize the renderer.
-+ * \param priv renderer handle
-+ */
-+void ass_renderer_done(ASS_Renderer *priv);
-+
-+/**
-+ * \brief Set the frame size in pixels, including margins.
-+ * The renderer will never return images that are outside of the frame area.
-+ * The value set with this function can influence the pixel aspect ratio used
-+ * for rendering.
-+ * If after compensating for configured margins the frame size
-+ * is not an isotropically scaled version of the video display size,
-+ * you may have to use ass_set_pixel_aspect().
-+ * @see ass_set_pixel_aspect()
-+ * @see ass_set_margins()
-+ * \param priv renderer handle
-+ * \param w width
-+ * \param h height
-+ *
-+ * NOTE: frame size must be configured before an ASS_Renderer can be used.
-+ */
-+void ass_set_frame_size(ASS_Renderer *priv, int w, int h);
-+
-+/**
-+ * \brief Set the source image size in pixels.
-+ * This affects some ASS tags like e.g. 3D transforms and
-+ * is used to calculate the source aspect ratio and blur scale.
-+ * If subtitles specify valid LayoutRes* headers, those will take precedence.
-+ * The source image size can be reset to default by setting w and h to 0.
-+ * The value set with this function can influence the pixel aspect ratio used
-+ * for rendering.
-+ * The values must be the actual storage size of the video stream,
-+ * without any anamorphic de-squeeze applied.
-+ * @see ass_set_pixel_aspect()
-+ * \param priv renderer handle
-+ * \param w width
-+ * \param h height
-+ *
-+ * NOTE: storage size must be configured to get correct results,
-+ *       otherwise libass is forced to make a fallible guess.
-+ */
-+void ass_set_storage_size(ASS_Renderer *priv, int w, int h);
-+
-+/**
-+ * \brief Set shaping level. This is merely a hint, the renderer will use
-+ * whatever is available if the request cannot be fulfilled.
-+ * \param level shaping level
-+ */
-+void ass_set_shaper(ASS_Renderer *priv, ASS_ShapingLevel level);
-+
-+/**
-+ * \brief Set frame margins.  These values may be negative if pan-and-scan
-+ * is used. The margins are in pixels. Each value specifies the distance from
-+ * the video rectangle to the renderer frame. If a given margin value is
-+ * positive, there will be free space between renderer frame and video area.
-+ * If a given margin value is negative, the frame is inside the video, i.e.
-+ * the video has been cropped.
-+ *
-+ * The renderer will try to keep subtitles inside the frame area. If possible,
-+ * text is layout so that it is inside the cropped area. Subtitle events
-+ * that can't be moved are cropped against the frame area.
-+ *
-+ * ass_set_use_margins() can be used to allow libass to render subtitles into
-+ * the empty areas if margins are positive, i.e. the video area is smaller than
-+ * the frame. (Traditionally, this has been used to show subtitles in
-+ * the bottom "black bar" between video bottom screen border when playing 16:9
-+ * video on a 4:3 screen.)
-+ *
-+ * \param priv renderer handle
-+ * \param t top margin
-+ * \param b bottom margin
-+ * \param l left margin
-+ * \param r right margin
-+ */
-+void ass_set_margins(ASS_Renderer *priv, int t, int b, int l, int r);
-+
-+/**
-+ * \brief Whether margins should be used for placing regular events.
-+ * \param priv renderer handle
-+ * \param use whether to use the margins
-+ */
-+void ass_set_use_margins(ASS_Renderer *priv, int use);
-+
-+/**
-+ * \brief Set pixel aspect ratio correction.
-+ * This is the ratio of pixel width to pixel height.
-+ *
-+ * Generally, this is (d_w / d_h) / (s_w / s_h), where s_w and s_h is the
-+ * video storage size, and d_w and d_h is the video display size. (Display
-+ * and storage size can be different for anamorphic video, such as DVDs.)
-+ *
-+ * If the pixel aspect ratio is 0, or if the aspect ratio has never been set
-+ * by calling this function, libass will calculate a default pixel aspect ratio
-+ * out of values set with ass_set_frame_size() and ass_set_storage_size(). Note
-+ * that this default assumes the frame size after compensating for margins
-+ * corresponds to an isotropically scaled version of the video display size.
-+ * If the storage size has not been set, a pixel aspect ratio of 1 is assumed.
-+ *
-+ * If subtitles specify valid LayoutRes* headers, the API-configured
-+ * pixel aspect value is discarded in favour of one calculated out of the
-+ * headers and values set with ass_set_frame_size().
-+ *
-+ * \param priv renderer handle
-+ * \param par pixel aspect ratio (1.0 means square pixels, 0 means default)
-+ */
-+void ass_set_pixel_aspect(ASS_Renderer *priv, double par);
-+
-+/**
-+ * \brief Set aspect ratio parameters.
-+ * This calls ass_set_pixel_aspect(priv, dar / sar).
-+ * @deprecated New code should use ass_set_pixel_aspect().
-+ * \param priv renderer handle
-+ * \param dar display aspect ratio (DAR), prescaled for output PAR
-+ * \param sar storage aspect ratio (SAR)
-+ */
-+ASS_DEPRECATED("use 'ass_set_pixel_aspect' instead")
-+void ass_set_aspect_ratio(ASS_Renderer *priv, double dar, double sar);
-+
-+/**
-+ * \brief Set a fixed font scaling factor.
-+ * \param priv renderer handle
-+ * \param font_scale scaling factor, default is 1.0
-+ */
-+void ass_set_font_scale(ASS_Renderer *priv, double font_scale);
-+
-+/**
-+ * \brief Set font hinting method.
-+ * \param priv renderer handle
-+ * \param ht hinting method
-+ */
-+void ass_set_hinting(ASS_Renderer *priv, ASS_Hinting ht);
-+
-+/**
-+ * \brief Set line spacing. Will not be scaled with frame size.
-+ * \param priv renderer handle
-+ * \param line_spacing line spacing in pixels
-+ */
-+void ass_set_line_spacing(ASS_Renderer *priv, double line_spacing);
-+
-+/**
-+ * \brief Set vertical line position.
-+ * \param priv renderer handle
-+ * \param line_position vertical line position of subtitles in percent
-+ * (0-100: 0 = on the bottom (default), 100 = on top)
-+ */
-+void ass_set_line_position(ASS_Renderer *priv, double line_position);
-+
-+/**
-+ * \brief Get the list of available font providers. The output array
-+ * is allocated with malloc and can be released with free(). If an
-+ * allocation error occurs, size is set to (size_t)-1.
-+ * \param priv library handle
-+ * \param providers output, list of default providers (malloc'ed array)
-+ * \param size output, number of providers
-+ * \return list of available font providers (user owns the returned array)
-+ */
-+void ass_get_available_font_providers(ASS_Library *priv,
-+                                      ASS_DefaultFontProvider **providers,
-+                                      size_t *size);
-+
-+/**
-+ * \brief Set font lookup defaults.
-+ * \param default_font path to default font to use. Must be supplied if
-+ * all system fontproviders are disabled or unavailable.
-+ * \param default_family fallback font family, or NULL
-+ * \param dfp which font provider to use (one of ASS_DefaultFontProvider). In
-+ * older libass version, this could be 0 or 1, where 1 enabled fontconfig.
-+ * Newer relases also accept 0 (ASS_FONTPROVIDER_NONE) and 1
-+ * (ASS_FONTPROVIDER_AUTODETECT), which is almost backward-compatible.
-+ * If the requested fontprovider does not exist or fails to initialize, the
-+ * behavior is the same as when ASS_FONTPROVIDER_NONE was passed.
-+ * \param config path to fontconfig configuration file, or NULL.  Only relevant
-+ * if fontconfig is used. The encoding must match the one accepted by fontconfig.
-+ * \param update whether fontconfig cache should be built/updated now.  Only
-+ * relevant if fontconfig is used.
-+ *
-+ * NOTE: font lookup must be configured before an ASS_Renderer can be used.
-+ */
-+void ass_set_fonts(ASS_Renderer *priv, const char *default_font,
-+                   const char *default_family, int dfp,
-+                   const char *config, int update);
-+
-+/**
-+ * \brief Set selective style override mode.
-+ * If enabled, the renderer attempts to override the ASS script's styling of
-+ * normal subtitles, without affecting explicitly positioned text. If an event
-+ * looks like a normal subtitle, parts of the font style are copied from the
-+ * user style set with ass_set_selective_style_override().
-+ * Warning: the heuristic used for deciding when to override the style is rather
-+ *          rough, and enabling this option can lead to incorrectly rendered
-+ *          subtitles. Since the ASS format doesn't have any support for
-+ *          allowing end-users to customize subtitle styling, this feature can
-+ *          only be implemented on "best effort" basis, and has to rely on
-+ *          heuristics that can easily break.
-+ * \param priv renderer handle
-+ * \param bits bit mask comprised of ASS_OverrideBits values.
-+ */
-+void ass_set_selective_style_override_enabled(ASS_Renderer *priv, int bits);
-+
-+/**
-+ * \brief Set style for selective style override.
-+ * See ass_set_selective_style_override_enabled().
-+ * \param style style settings to use if override is enabled. Applications
-+ * should initialize it with {0} before setting fields. Strings will be copied
-+ * by the function.
-+ */
-+void ass_set_selective_style_override(ASS_Renderer *priv, ASS_Style *style);
-+
-+/**
-+ * \brief This is a stub and does nothing. Old documentation: Update/build font
-+ * cache.  This needs to be called if it was disabled when ass_set_fonts was set.
-+ *
-+ * \param priv renderer handle
-+ * \return success
-+ */
-+ASS_DEPRECATED("it does nothing")
-+int ass_fonts_update(ASS_Renderer *priv);
-+
-+/**
-+ * \brief Set hard cache limits.  Do not set, or set to zero, for reasonable
-+ * defaults.
-+ *
-+ * \param priv renderer handle
-+ * \param glyph_max maximum number of cached glyphs
-+ * \param bitmap_max_size maximum bitmap cache size (in MB)
-+ */
-+void ass_set_cache_limits(ASS_Renderer *priv, int glyph_max,
-+                          int bitmap_max_size);
-+
-+/**
-+ * \brief Render a frame, producing a list of ASS_Image.
-+ * \param priv renderer handle
-+ * \param track subtitle track
-+ * \param now video timestamp in milliseconds
-+ * \param detect_change compare to the previous call and set to 1
-+ * if positions may have changed, or set to 2 if content may have changed.
-+ */
-+ASS_Image *ass_render_frame(ASS_Renderer *priv, ASS_Track *track,
-+                            long long now, int *detect_change);
-+
-+
-+/*
-+ * The following functions operate on track objects and do not need
-+ * an ass_renderer
-+ */
-+
-+/**
-+ * \brief Allocate a new empty track object.
-+ * \param library handle
-+ * \return pointer to empty track or NULL on failure
-+ */
-+ASS_Track *ass_new_track(ASS_Library *);
-+
-+/**
-+ * \brief Enable or disable certain features
-+ * This manages flags that control the behavior of the renderer and how certain
-+ * tags etc. within the track are interpreted. The defaults on a newly created
-+ * ASS_Track are such that rendering is compatible with traditional renderers
-+ * like VSFilter, and/or old versions of libass. Calling ass_process_data() or
-+ * ass_process_codec_private() may change some of these flags according to file
-+ * headers. (ass_process_chunk() will not change any of the flags.)
-+ * Additions to ASS_Feature are backward compatible to old libass releases (ABI
-+ * compatibility).
-+ * After calling ass_render_frame, changing features is no longer allowed.
-+ * \param track track
-+ * \param feature the specific feature to enable or disable
-+ * \param enable 0 for disable, any non-0 value for enable
-+ * \return 0 if feature set, -1 if feature is unknown
-+ */
-+int ass_track_set_feature(ASS_Track *track, ASS_Feature feature, int enable);
-+
-+/**
-+ * \brief Deallocate track and all its child objects (styles and events).
-+ * \param track track to deallocate or NULL
-+ */
-+void ass_free_track(ASS_Track *track);
-+
-+/**
-+ * \brief Allocate new style.
-+ * \param track track
-+ * \return newly allocated style id >= 0, or a value < 0 on failure
-+ * See GENERAL NOTE in ass_types.h.
-+ */
-+int ass_alloc_style(ASS_Track *track);
-+
-+/**
-+ * \brief Allocate new event.
-+ * \param track track
-+ * \return newly allocated event id >= 0, or a value < 0 on failure
-+ * See GENERAL NOTE in ass_types.h.
-+ */
-+int ass_alloc_event(ASS_Track *track);
-+
-+/**
-+ * \brief Delete a style.
-+ * \param track track
-+ * \param sid style id
-+ * Deallocates style data. Does not modify track->n_styles.
-+ * Freeing a style without subsequently setting track->n_styles
-+ * to a value less than or equal to the freed style id before calling
-+ * any other libass API function on the track is undefined behaviour.
-+ * Additionally a freed style style still being referenced by an event
-+ * in track->events will also result in undefined behaviour.
-+ * See GENERAL NOTE in ass_types.h.
-+ */
-+void ass_free_style(ASS_Track *track, int sid);
-+
-+/**
-+ * \brief Delete an event.
-+ * \param track track
-+ * \param eid event id
-+ * Deallocates event data. Does not modify track->n_events.
-+ * Freeing an event without subsequently setting track->n_events
-+ * to a value less than or equal to the freed event id before calling
-+ * any other libass API function on the track is undefined behaviour.
-+ * See GENERAL NOTE in ass_types.h
-+ */
-+void ass_free_event(ASS_Track *track, int eid);
-+
-+/**
-+ * \brief Parse a chunk of subtitle stream data.
-+ * \param track track
-+ * \param data string to parse
-+ * \param size length of data
-+ */
-+void ass_process_data(ASS_Track *track, char *data, int size);
-+
-+/**
-+ * \brief Parse Codec Private section of the subtitle stream, in Matroska
-+ * format.  See the Matroska specification for details.
-+ * \param track target track
-+ * \param data string to parse
-+ * \param size length of data
-+ */
-+void ass_process_codec_private(ASS_Track *track, char *data, int size);
-+
-+/**
-+ * \brief Parse a chunk of subtitle stream data. A chunk contains exactly one
-+ * event in Matroska format.  See the Matroska specification for details.
-+ * In later libass versions (since LIBASS_VERSION==0x01300001), using this
-+ * function means you agree not to modify events manually, or using other
-+ * functions manipulating the event list like ass_process_data(). If you do
-+ * anyway, the internal duplicate checking might break. Calling
-+ * ass_flush_events() is still allowed.
-+ * \param track track
-+ * \param data string to parse
-+ * \param size length of data
-+ * \param timecode starting time of the event (milliseconds)
-+ * \param duration duration of the event (milliseconds)
-+ */
-+void ass_process_chunk(ASS_Track *track, char *data, int size,
-+                       long long timecode, long long duration);
-+
-+/**
-+ * \brief Set whether the ReadOrder field when processing a packet with
-+ * ass_process_chunk() should be used for eliminating duplicates.
-+ * \param check_readorder 0 means do not try to eliminate duplicates; 1 means
-+ * use the ReadOrder field embedded in the packet as unique identifier, and
-+ * discard the packet if there was already a packet with the same ReadOrder.
-+ * Other values are undefined.
-+ * If this function is not called, the default value is 1.
-+ */
-+void ass_set_check_readorder(ASS_Track *track, int check_readorder);
-+
-+/**
-+ * \brief Flush buffered events.
-+ * \param track track
-+*/
-+void ass_flush_events(ASS_Track *track);
-+
-+/**
-+ * \brief Read subtitles from file.
-+ * \param library library handle
-+ * \param fname file name
-+ * \param codepage encoding (iconv format)
-+ * \return newly allocated track or NULL on failure
-+ * NOTE: On Microsoft Windows, when using WIN32-APIs, fname must be in either
-+ * UTF-8 mixed with lone or paired UTF-16 surrogates encoded like in CESU-8
-+ * or the encoding accepted by fopen with the former taking precedence
-+ * if both versions are valid and exist.
-+ * On all other systems there is no need for special considerations like that.
-+*/
-+ASS_Track *ass_read_file(ASS_Library *library, char *fname,
-+                         char *codepage);
-+
-+/**
-+ * \brief Read subtitles from memory.
-+ * \param library library handle
-+ * \param buf pointer to subtitles text
-+ * \param bufsize size of buffer
-+ * \param codepage encoding (iconv format)
-+ * \return newly allocated track or NULL on failure
-+*/
-+ASS_Track *ass_read_memory(ASS_Library *library, char *buf,
-+                           size_t bufsize, char *codepage);
-+/**
-+ * \brief Read styles from file into already initialized track.
-+ * \param fname file name
-+ * \param codepage encoding (iconv format)
-+ * \return 0 on success
-+ * NOTE: On Microsoft Windows, when using WIN32-APIs, fname must be in either
-+ * UTF-8 mixed with lone or paired UTF-16 surrogates encoded like in CESU-8
-+ * or the encoding accepted by fopen with the former taking precedence
-+ * if both versions are valid and exist.
-+ * On all other systems there is no need for special considerations like that.
-+ */
-+int ass_read_styles(ASS_Track *track, char *fname, char *codepage);
-+
-+/**
-+ * \brief Add a memory font.
-+ * \param library library handle
-+ * \param name attachment name
-+ * \param data binary font data
-+ * \param data_size data size
-+*/
-+void ass_add_font(ASS_Library *library, const char *name, const char *data,
-+                  int data_size);
-+
-+/**
-+ * \brief Remove all fonts stored in an ass_library object.
-+ * This can only be called safely if all ASS_Track and ASS_Renderer instances
-+ * associated with the library handle have been released first.
-+ * \param library library handle
-+ */
-+void ass_clear_fonts(ASS_Library *library);
-+
-+/**
-+ * \brief Calculates timeshift from now to the start of some other subtitle
-+ * event, depending on movement parameter.
-+ * \param track subtitle track
-+ * \param now current time in milliseconds
-+ * \param movement how many events to skip from the one currently displayed
-+ * +2 means "the one after the next", -1 means "previous"
-+ * \return timeshift in milliseconds
-+ */
-+long long ass_step_sub(ASS_Track *track, long long now, int movement);
-+
-+#undef ASS_DEPRECATED
-+#undef ASS_DEPRECATED_ENUM
-+
-+#ifdef __cplusplus
-+}
-+#endif
-+
-+#endif /* LIBASS_ASS_H */
 diff --git a/sub/ass_mp.c b/sub/ass_mp.c
-index 634681f..ddd945d 100644
+deleted file mode 100644
+index c8b1bd0..0000000
 --- a/sub/ass_mp.c
-+++ b/sub/ass_mp.c
-@@ -25,8 +25,8 @@
- #include <assert.h>
- #include <math.h>
- 
++++ /dev/null
+@@ -1,472 +0,0 @@
+-/*
+- * Copyright (C) 2006 Evgeniy Stepanov <eugeni.stepanov@gmail.com>
+- *
+- * This file is part of mpv.
+- *
+- * mpv is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU Lesser General Public
+- * License as published by the Free Software Foundation; either
+- * version 2.1 of the License, or (at your option) any later version.
+- *
+- * mpv is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU Lesser General Public License for more details.
+- *
+- * You should have received a copy of the GNU Lesser General Public
+- * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
+- */
+-
+-#include <inttypes.h>
+-#include <string.h>
+-#include <stdlib.h>
+-#include <stdarg.h>
+-#include <stdbool.h>
+-#include <assert.h>
+-#include <math.h>
+-
 -#include <ass/ass.h>
 -#include <ass/ass_types.h>
-+// #include <ass/ass.h>
-+// #include <ass/ass_types.h>
- 
- #include "common/common.h"
- #include "common/global.h"
+-
+-#include "common/common.h"
+-#include "common/msg.h"
+-#include "options/path.h"
+-#include "ass_mp.h"
+-#include "img_convert.h"
+-#include "osd.h"
+-#include "stream/stream.h"
+-#include "options/options.h"
+-#include "video/out/bitmap_packer.h"
+-#include "video/mp_image.h"
+-
+-// res_y should be track->PlayResY
+-// It determines scaling of font sizes and more.
+-void mp_ass_set_style(ASS_Style *style, double res_y,
+-                      const struct osd_style_opts *opts)
+-{
+-    if (!style)
+-        return;
+-
+-    if (opts->font) {
+-        if (!style->FontName || strcmp(style->FontName, opts->font) != 0) {
+-            free(style->FontName);
+-            style->FontName = strdup(opts->font);
+-        }
+-    }
+-
+-    // libass_font_size = FontSize * (window_height / res_y)
+-    // scale translates parameters from PlayResY=720 to res_y
+-    double scale = res_y / 720.0;
+-
+-    style->FontSize = opts->font_size * scale;
+-    style->PrimaryColour = MP_ASS_COLOR(opts->color);
+-    style->SecondaryColour = style->PrimaryColour;
+-    style->OutlineColour = MP_ASS_COLOR(opts->outline_color);
+-    style->BackColour = MP_ASS_COLOR(opts->back_color);
+-    style->BorderStyle = opts->border_style;
+-    style->Outline = opts->outline_size * scale;
+-    style->Shadow = opts->shadow_offset * scale;
+-    style->Spacing = opts->spacing * scale;
+-    style->MarginL = opts->margin_x * scale;
+-    style->MarginR = style->MarginL;
+-    style->MarginV = opts->margin_y * scale;
+-    style->ScaleX = 1.;
+-    style->ScaleY = 1.;
+-    style->Alignment = 1 + (opts->align_x + 1) + (opts->align_y + 2) % 3 * 4;
+-#ifdef ASS_JUSTIFY_LEFT
+-    style->Justify = opts->justify;
+-#endif
+-    style->Blur = opts->blur;
+-    style->Bold = opts->bold;
+-    style->Italic = opts->italic;
+-}
+-
+-void mp_ass_configure_fonts(ASS_Renderer *priv, struct osd_style_opts *opts,
+-                            struct mpv_global *global, struct mp_log *log)
+-{
+-    void *tmp = talloc_new(NULL);
+-    char *default_font = mp_find_config_file(tmp, global, "subfont.ttf");
+-    char *config       = mp_find_config_file(tmp, global, "fonts.conf");
+-
+-    if (default_font && !mp_path_exists(default_font))
+-        default_font = NULL;
+-
+-    int font_provider = ASS_FONTPROVIDER_AUTODETECT;
+-    if (opts->font_provider == 1)
+-        font_provider = ASS_FONTPROVIDER_NONE;
+-    if (opts->font_provider == 2)
+-        font_provider = ASS_FONTPROVIDER_FONTCONFIG;
+-
+-    mp_verbose(log, "Setting up fonts...\n");
+-    ass_set_fonts(priv, default_font, opts->font, font_provider, config, 1);
+-    mp_verbose(log, "Done.\n");
+-
+-    talloc_free(tmp);
+-}
+-
+-static const int map_ass_level[] = {
+-    MSGL_ERR,           // 0 "FATAL errors"
+-    MSGL_WARN,
+-    MSGL_INFO,
+-    MSGL_V,
+-    MSGL_V,
+-    MSGL_DEBUG,         // 5 application recommended level
+-    MSGL_TRACE,
+-    MSGL_TRACE,         // 7 "verbose DEBUG"
+-};
+-
+-MP_PRINTF_ATTRIBUTE(2, 0)
+-static void message_callback(int level, const char *format, va_list va, void *ctx)
+-{
+-    struct mp_log *log = ctx;
+-    if (!log)
+-        return;
+-    level = map_ass_level[level];
+-    mp_msg_va(log, level, format, va);
+-    // libass messages lack trailing \n
+-    mp_msg(log, level, "\n");
+-}
+-
+-ASS_Library *mp_ass_init(struct mpv_global *global,
+-                         struct osd_style_opts *opts, struct mp_log *log)
+-{
+-    char *path = opts->fonts_dir && opts->fonts_dir[0] ?
+-                 mp_get_user_path(NULL, global, opts->fonts_dir) :
+-                 mp_find_config_file(NULL, global, "fonts");
+-    mp_dbg(log, "ASS library version: 0x%x (runtime 0x%x)\n",
+-           (unsigned)LIBASS_VERSION, ass_library_version());
+-    ASS_Library *priv = ass_library_init();
+-    if (!priv)
+-        abort();
+-    ass_set_message_cb(priv, message_callback, log);
+-    if (path)
+-        ass_set_fonts_dir(priv, path);
+-    talloc_free(path);
+-    return priv;
+-}
+-
+-void mp_ass_flush_old_events(ASS_Track *track, long long ts)
+-{
+-    int n = 0;
+-    for (; n < track->n_events; n++) {
+-        if ((track->events[n].Start + track->events[n].Duration) >= ts)
+-            break;
+-        ass_free_event(track, n);
+-        track->n_events--;
+-    }
+-    for (int i = 0; n > 0 && i < track->n_events; i++) {
+-        track->events[i] = track->events[i+n];
+-    }
+-}
+-
+-static void draw_ass_rgba(unsigned char *src, int src_w, int src_h,
+-                          int src_stride, unsigned char *dst, size_t dst_stride,
+-                          int dst_x, int dst_y, uint32_t color)
+-{
+-    const unsigned int r = (color >> 24) & 0xff;
+-    const unsigned int g = (color >> 16) & 0xff;
+-    const unsigned int b = (color >>  8) & 0xff;
+-    const unsigned int a = 0xff - (color & 0xff);
+-
+-    dst += dst_y * dst_stride + dst_x * 4;
+-
+-    for (int y = 0; y < src_h; y++, dst += dst_stride, src += src_stride) {
+-        uint32_t *dstrow = (uint32_t *) dst;
+-        for (int x = 0; x < src_w; x++) {
+-            const unsigned int v = src[x];
+-            int rr = (r * a * v);
+-            int gg = (g * a * v);
+-            int bb = (b * a * v);
+-            int aa =      a * v;
+-            uint32_t dstpix = dstrow[x];
+-            unsigned int dstb =  dstpix        & 0xFF;
+-            unsigned int dstg = (dstpix >>  8) & 0xFF;
+-            unsigned int dstr = (dstpix >> 16) & 0xFF;
+-            unsigned int dsta = (dstpix >> 24) & 0xFF;
+-            dstb = (bb       + dstb * (255 * 255 - aa)) / (255 * 255);
+-            dstg = (gg       + dstg * (255 * 255 - aa)) / (255 * 255);
+-            dstr = (rr       + dstr * (255 * 255 - aa)) / (255 * 255);
+-            dsta = (aa * 255 + dsta * (255 * 255 - aa)) / (255 * 255);
+-            dstrow[x] = dstb | (dstg << 8) | (dstr << 16) | (dsta << 24);
+-        }
+-    }
+-}
+-
+-struct mp_ass_packer {
+-    struct sub_bitmap *cached_parts; // only for the array memory
+-    struct mp_image *cached_img;
+-    struct sub_bitmaps cached_subs;
+-    bool cached_subs_valid;
+-    struct sub_bitmap rgba_imgs[MP_SUB_BB_LIST_MAX];
+-    struct bitmap_packer *packer;
+-};
+-
+-// Free with talloc_free().
+-struct mp_ass_packer *mp_ass_packer_alloc(void *ta_parent)
+-{
+-    struct mp_ass_packer *p = talloc_zero(ta_parent, struct mp_ass_packer);
+-    p->packer = talloc_zero(p, struct bitmap_packer);
+-    p->packer->padding = 1; // assume bilinear sampling
+-    return p;
+-}
+-
+-static bool pack(struct mp_ass_packer *p, struct sub_bitmaps *res, int imgfmt)
+-{
+-    packer_set_size(p->packer, res->num_parts);
+-
+-    for (int n = 0; n < res->num_parts; n++)
+-        p->packer->in[n] = (struct pos){res->parts[n].w, res->parts[n].h};
+-
+-    if (p->packer->count == 0 || packer_pack(p->packer) < 0)
+-        return false;
+-
+-    struct pos bb[2];
+-    packer_get_bb(p->packer, bb);
+-
+-    res->packed_w = bb[1].x;
+-    res->packed_h = bb[1].y;
+-
+-    if (!p->cached_img || p->cached_img->w < res->packed_w ||
+-                          p->cached_img->h < res->packed_h ||
+-                          p->cached_img->imgfmt != imgfmt)
+-    {
+-        talloc_free(p->cached_img);
+-        p->cached_img = mp_image_alloc(imgfmt, p->packer->w, p->packer->h);
+-        if (!p->cached_img) {
+-            packer_reset(p->packer);
+-            return false;
+-        }
+-        talloc_steal(p, p->cached_img);
+-    }
+-
+-    if (!mp_image_make_writeable(p->cached_img)) {
+-        packer_reset(p->packer);
+-        return false;
+-    }
+-
+-    res->packed = p->cached_img;
+-
+-    for (int n = 0; n < res->num_parts; n++) {
+-        struct sub_bitmap *b = &res->parts[n];
+-        struct pos pos = p->packer->result[n];
+-
+-        b->src_x = pos.x;
+-        b->src_y = pos.y;
+-    }
+-
+-    return true;
+-}
+-
+-static void fill_padding_1(uint8_t *base, int w, int h, int stride, int padding)
+-{
+-    for (int row = 0; row < h; ++row) {
+-        uint8_t *row_ptr = base + row * stride;
+-        uint8_t left_pixel = row_ptr[0];
+-        uint8_t right_pixel = row_ptr[w - 1];
+-
+-        for (int i = 1; i <= padding; ++i)
+-            row_ptr[-i] = left_pixel;
+-
+-        for (int i = 0; i < padding; ++i)
+-            row_ptr[w + i] = right_pixel;
+-    }
+-
+-    int row_bytes = (w + 2 * padding);
+-    uint8_t *top_row = base - padding;
+-    for (int i = 1; i <= padding; ++i)
+-        memcpy(base - i * stride - padding, top_row, row_bytes);
+-
+-    uint8_t *last_row = base + (h - 1) * stride - padding;
+-    for (int i = 0; i < padding; ++i)
+-        memcpy(base + (h + i) * stride - padding, last_row, row_bytes);
+-}
+-
+-static void fill_padding_4(uint8_t *base, int w, int h, int stride, int padding)
+-{
+-    for (int row = 0; row < h; ++row) {
+-        uint32_t *row_ptr = (uint32_t *)(base + row * stride);
+-        uint32_t left_pixel = row_ptr[0];
+-        uint32_t right_pixel = row_ptr[w - 1];
+-
+-        for (int i = 1; i <= padding; ++i)
+-            row_ptr[-i] = left_pixel;
+-
+-        for (int i = 0; i < padding; ++i)
+-            row_ptr[w + i] = right_pixel;
+-    }
+-
+-    int row_bytes = (w + 2 * padding) * 4;
+-    uint8_t *top_row = base - padding * 4;
+-    for (int i = 1; i <= padding; ++i)
+-        memcpy(base - i * stride - padding * 4, top_row, row_bytes);
+-
+-    uint8_t *last_row = base + (h - 1) * stride - padding * 4;
+-    for (int i = 0; i < padding; ++i)
+-        memcpy(base + (h + i) * stride - padding * 4, last_row, row_bytes);
+-}
+-
+-static bool pack_libass(struct mp_ass_packer *p, struct sub_bitmaps *res)
+-{
+-    if (!pack(p, res, IMGFMT_Y8))
+-        return false;
+-
+-    int padding = p->packer->padding;
+-    uint8_t *base = res->packed->planes[0];
+-    int stride = res->packed->stride[0];
+-
+-    for (int n = 0; n < res->num_parts; n++) {
+-        struct sub_bitmap *b = &res->parts[n];
+-        void *pdata = base + b->src_y * stride + b->src_x;
+-        memcpy_pic(pdata, b->bitmap, b->w, b->h, stride, b->stride);
+-        fill_padding_1(pdata, b->w, b->h, stride, padding);
+-
+-        b->bitmap = pdata;
+-        b->stride = stride;
+-    }
+-
+-    return true;
+-}
+-
+-static bool pack_rgba(struct mp_ass_packer *p, struct sub_bitmaps *res)
+-{
+-    struct mp_rect bb_list[MP_SUB_BB_LIST_MAX];
+-    int num_bb = mp_get_sub_bb_list(res, bb_list, MP_SUB_BB_LIST_MAX);
+-
+-    struct sub_bitmaps imgs = {
+-        .change_id = res->change_id,
+-        .format = SUBBITMAP_BGRA,
+-        .parts = p->rgba_imgs,
+-        .num_parts = num_bb,
+-    };
+-
+-    for (int n = 0; n < imgs.num_parts; n++) {
+-        imgs.parts[n].w = bb_list[n].x1 - bb_list[n].x0;
+-        imgs.parts[n].h = bb_list[n].y1 - bb_list[n].y0;
+-    }
+-
+-    if (!pack(p, &imgs, IMGFMT_BGRA))
+-        return false;
+-
+-    int padding = p->packer->padding;
+-    uint8_t *base = imgs.packed->planes[0];
+-    int stride = imgs.packed->stride[0];
+-
+-    for (int n = 0; n < num_bb; n++) {
+-        struct mp_rect bb = bb_list[n];
+-        struct sub_bitmap *b = &imgs.parts[n];
+-
+-        b->x = bb.x0;
+-        b->y = bb.y0;
+-        b->w = b->dw = mp_rect_w(bb);
+-        b->h = b->dh = mp_rect_h(bb);
+-        b->stride = stride;
+-        b->bitmap = base + b->stride * b->src_y + b->src_x * 4;
+-        memset_pic(b->bitmap, 0, b->w * 4, b->h, b->stride);
+-
+-        for (int i = 0; i < res->num_parts; i++) {
+-            struct sub_bitmap *s = &res->parts[i];
+-
+-            // Assume mp_get_sub_bb_list() never splits sub bitmaps
+-            // So we don't clip/adjust the size of the sub bitmap
+-            if (s->x >= b->x + b->w || s->x + s->w <= b->x ||
+-                s->y >= b->y + b->h || s->y + s->h <= b->y)
+-                continue;
+-
+-            draw_ass_rgba(s->bitmap, s->w, s->h, s->stride,
+-                          b->bitmap, b->stride,
+-                          s->x - b->x, s->y - b->y,
+-                          s->libass.color);
+-        }
+-        fill_padding_4(b->bitmap, b->w, b->h, b->stride, padding);
+-    }
+-
+-    *res = imgs;
+-    return true;
+-}
+-
+-// Pack the contents of image_lists[0] to image_lists[num_image_lists-1] into
+-// a single image, and make *out point to it. *out is completely overwritten.
+-// If libass reported any change, image_lists_changed must be set (it then
+-// repacks all images). preferred_osd_format can be set to a desired
+-// sub_bitmap_format. Currently, only SUBBITMAP_LIBASS is supported.
+-void mp_ass_packer_pack(struct mp_ass_packer *p, ASS_Image **image_lists,
+-                        int num_image_lists, bool image_lists_changed, bool video_color_space,
+-                        int preferred_osd_format, struct sub_bitmaps *out)
+-{
+-    int format = preferred_osd_format == SUBBITMAP_BGRA ? SUBBITMAP_BGRA
+-                                                        : SUBBITMAP_LIBASS;
+-
+-    if (p->cached_subs_valid && !image_lists_changed &&
+-        p->cached_subs.format == format)
+-    {
+-        *out = p->cached_subs;
+-        return;
+-    }
+-
+-    *out = (struct sub_bitmaps){.change_id = 1};
+-    p->cached_subs_valid = false;
+-
+-    struct sub_bitmaps res = {
+-        .change_id = image_lists_changed,
+-        .format = SUBBITMAP_LIBASS,
+-        .parts = p->cached_parts,
+-        .video_color_space = video_color_space,
+-    };
+-
+-    for (int n = 0; n < num_image_lists; n++) {
+-        for (struct ass_image *img = image_lists[n]; img; img = img->next) {
+-            if (img->w == 0 || img->h == 0)
+-                continue;
+-            MP_TARRAY_GROW(p, p->cached_parts, res.num_parts);
+-            res.parts = p->cached_parts;
+-            struct sub_bitmap *b = &res.parts[res.num_parts];
+-            b->bitmap = img->bitmap;
+-            b->stride = img->stride;
+-            b->libass.color = img->color;
+-            b->dw = b->w = img->w;
+-            b->dh = b->h = img->h;
+-            b->x = img->dst_x;
+-            b->y = img->dst_y;
+-            res.num_parts++;
+-        }
+-    }
+-
+-    bool r = false;
+-    if (format == SUBBITMAP_BGRA) {
+-        r = pack_rgba(p, &res);
+-    } else {
+-        r = pack_libass(p, &res);
+-    }
+-
+-    if (!r)
+-        return;
+-
+-    *out = res;
+-    p->cached_subs = res;
+-    p->cached_subs.change_id = 0;
+-    p->cached_subs_valid = true;
+-}
+-
+-// Set *out_rc to [x0, y0, x1, y1] of the graphical bounding box in script
+-// coordinates.
+-// Set it to [inf, inf, -inf, -inf] if empty.
+-void mp_ass_get_bb(ASS_Image *image_list, ASS_Track *track,
+-                   struct mp_osd_res *res, double *out_rc)
+-{
+-    double rc[4] = {INFINITY, INFINITY, -INFINITY, -INFINITY};
+-
+-    for (ASS_Image *img = image_list; img; img = img->next) {
+-        if (img->w == 0 || img->h == 0)
+-            continue;
+-        rc[0] = MPMIN(rc[0], img->dst_x);
+-        rc[1] = MPMIN(rc[1], img->dst_y);
+-        rc[2] = MPMAX(rc[2], img->dst_x + img->w);
+-        rc[3] = MPMAX(rc[3], img->dst_y + img->h);
+-    }
+-
+-    double scale = track->PlayResY / (double)MPMAX(res->h, 1);
+-    if (scale > 0) {
+-        for (int i = 0; i < 4; i++)
+-            out_rc[i] = rc[i] * scale;
+-    }
+-}
 diff --git a/sub/ass_mp.h b/sub/ass_mp.h
-index 3dd2bf6..77597ec 100644
+deleted file mode 100644
+index b4e16d6..0000000
 --- a/sub/ass_mp.h
-+++ b/sub/ass_mp.h
-@@ -23,8 +23,10 @@
- #include <stdint.h>
- #include <stdbool.h>
- 
++++ /dev/null
+@@ -1,65 +0,0 @@
+-/*
+- * Copyright (C) 2006 Evgeniy Stepanov <eugeni.stepanov@gmail.com>
+- *
+- * This file is part of mpv.
+- *
+- * mpv is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU Lesser General Public
+- * License as published by the Free Software Foundation; either
+- * version 2.1 of the License, or (at your option) any later version.
+- *
+- * mpv is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU Lesser General Public License for more details.
+- *
+- * You should have received a copy of the GNU Lesser General Public
+- * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
+- */
+-
+-#ifndef MPLAYER_ASS_MP_H
+-#define MPLAYER_ASS_MP_H
+-
+-#include <stdint.h>
+-#include <stdbool.h>
+-
 -#include <ass/ass.h>
 -#include <ass/ass_types.h>
-+// #include <ass/ass.h>
-+// #include <ass/ass_types.h>
-+#include "ass.h"
-+#include "ass_types.h"
- 
- // This is probably arbitrary.
- // sd_lavc_conv might indirectly still assume this PlayResY, though.
-diff --git a/sub/ass_types.h b/sub/ass_types.h
-new file mode 100644
-index 0000000..e4cc222
---- /dev/null
-+++ b/sub/ass_types.h
-@@ -0,0 +1,292 @@
-+/*
-+ * Copyright (C) 2006 Evgeniy Stepanov <eugeni.stepanov@gmail.com>
-+ * Copyright (C) 2011 Grigori Goronzy <greg@chown.ath.cx>
-+ *
-+ * This file is part of libass.
-+ *
-+ * Permission to use, copy, modify, and distribute this software for any
-+ * purpose with or without fee is hereby granted, provided that the above
-+ * copyright notice and this permission notice appear in all copies.
-+ *
-+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
-+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
-+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-+ */
-+
-+#ifndef LIBASS_TYPES_H
-+#define LIBASS_TYPES_H
-+
-+#include <stdint.h>
-+
-+/**
-+ * GENERAL NOTE regarding the definitions exposed by this header
-+ *
-+ * The main use case for this is _reading_ the track fields, especially
-+ * track->YCbCrMatrix, to correctly display the rendering results.
-+ *
-+ * Furthermore, the exposed definitions also open up the possibility to _modify_
-+ * the exposed structs, working closer to library internals and bypassing
-+ * e.g. creation of intermediate ASS-text buffers when creating dynamic events.
-+ * This is an advanced use case and should only be done when well-versed in ASS
-+ * and aware of the effects and legal values of _all_ fields of the structs.
-+ * The burden of sanitising and correctly initialising fields is then also
-+ * placed on the API user.
-+ * By nature of direct struct modifications working closer to library internals,
-+ * workflows that make use of this possibility are also more likely to be
-+ * affected by future API breaks than those which do not.
-+ *
-+ * To avoid desynchronisation with internal states, there are some restrictions
-+ * on when and how direct struct modification can be performed.
-+ * Ignoring them may lead to undefined behaviour. See the following listing:
-+ *
-+ *  - Manual struct edits and track-modifying (including modification to the
-+ *    event and style elements of the track) API calls cannot be freely mixed:
-+ *    - Before manual changes are performed, it is allowed to call any such API,
-+ *      unless the documentation of the funtion says otherwise.
-+ *    - After manual changes have been performed, no track-modifying API may be
-+ *      invoked, except for ass_track_set_feature and ass_flush_events.
-+ *  - After the first call to ass_render_frame, existing array members
-+ *    (e.g. members of events) and non-array track fields (e.g. PlayResX
-+ *    or event_format) must not be modified. Adding new members to arrays
-+ *    and updating the corresponding counter remains allowed.
-+ *  - Adding and removing members to array fields, like events or styles,
-+ *    must be done through the corresponding API function, e.g. ass_alloc_event.
-+ *    See the documentation of these functions.
-+ *  - The memory pointed to by string fields (char *) must be
-+ *    free'able by the implementation of free used by libass.
-+ *
-+ * A non-exhaustive list of examples of track-modifying API functions:
-+ *   ass_process_data, ass_process_codec_private,
-+ *   ass_process_chunk, ass_read_styles, ...
-+ *
-+ * Direct struct modification can be done safely, but it is also easy to
-+ * miss an initialisation or violate these restrictions, thus introducing bugs
-+ * that may not manifest immediately. It should be carefully considered
-+ * whether this is worthwhile for the desired use-case.
-+ */
-+
-+#define VALIGN_SUB 0
-+#define VALIGN_CENTER 8
-+#define VALIGN_TOP 4
-+#define HALIGN_LEFT 1
-+#define HALIGN_CENTER 2
-+#define HALIGN_RIGHT 3
-+#define ASS_JUSTIFY_AUTO 0
-+#define ASS_JUSTIFY_LEFT 1
-+#define ASS_JUSTIFY_CENTER 2
-+#define ASS_JUSTIFY_RIGHT 3
-+
-+#define FONT_WEIGHT_LIGHT  300
-+#define FONT_WEIGHT_MEDIUM 400
-+#define FONT_WEIGHT_BOLD   700
-+#define FONT_SLANT_NONE    0
-+#define FONT_SLANT_ITALIC  100
-+#define FONT_SLANT_OBLIQUE 110
-+#define FONT_WIDTH_CONDENSED 75
-+#define FONT_WIDTH_NORMAL    100
-+#define FONT_WIDTH_EXPANDED  125
-+
-+
-+/* Opaque objects internally used by libass.  Contents are private. */
-+typedef struct ass_renderer ASS_Renderer;
-+typedef struct render_priv ASS_RenderPriv;
-+typedef struct parser_priv ASS_ParserPriv;
-+typedef struct ass_library ASS_Library;
-+
-+/* ASS Style: line */
-+typedef struct ass_style {
-+    char *Name;     //must be a valid non-NULL string pointer; may be an empty string
-+    char *FontName; //must be a valid non-NULL string pointer; may be an empty string
-+    double FontSize;
-+    uint32_t PrimaryColour;
-+    uint32_t SecondaryColour;
-+    uint32_t OutlineColour;
-+    uint32_t BackColour;
-+    int Bold;      // 0 or 1 (boolean)
-+    int Italic;    // 0 or 1 (boolean)
-+    int Underline; // 0 or 1 (boolean)
-+    int StrikeOut; // 0 or 1 (boolean)
-+    double ScaleX; // positive with 1.0 representing 100%
-+    double ScaleY; // positive with 1.0 representing 100%
-+    double Spacing;
-+    double Angle;
-+    int BorderStyle;
-+    double Outline;
-+    double Shadow;
-+    int Alignment; // use `VALIGN_* | HALIGN_*` as value
-+    int MarginL;
-+    int MarginR;
-+    int MarginV;
-+    int Encoding;
-+    int treat_fontname_as_pattern; // does nothing (left in place for ABI-compatibility)
-+    double Blur; // sets a default \blur for the event; same values as \blur
-+    int Justify; // sets text justification independent of event alignment; use ASS_JUSTIFY_*
-+} ASS_Style;
-+
-+
-+/*
-+ * ASS_Event corresponds to a single Dialogue line;
-+ * text is stored as-is, style overrides will be parsed later.
-+ */
-+typedef struct ass_event {
-+    long long Start;            // ms
-+    long long Duration;         // ms
-+
-+    int ReadOrder;
-+    int Layer;
-+    int Style;
-+    char *Name;
-+    int MarginL;
-+    int MarginR;
-+    int MarginV;
-+    char *Effect;
-+    char *Text;
-+
-+    ASS_RenderPriv *render_priv;
-+} ASS_Event;
-+
-+/**
-+ * Support for (xy-)VSFilter mangled colors
-+ *
-+ * Generally, xy-VSFilter emulates the classic VSFilter behavior of
-+ * rendering directly into the (usually YCbCr) video. Classic
-+ * guliverkli(2)-VSFilter is hardcoded to use BT.601(TV) as target colorspace
-+ * when converting the subtitle RGB color to the video colorspace.
-+ * This led to odd results when other colorspaces were used, particular
-+ * once those became more common with the rise of HDTV video:
-+ * HDTV typically uses BT.709(TV), but VSFilter continued assuming
-+ * BT.601(TV) for conversion.
-+ *
-+ * This means classic vsfilter will mangle colors as follows:
-+ *
-+ *    screen_rgb = video_csp_to_rgb(rgb_to_bt601tv(ass_rgb))
-+ *
-+ * where video_csp is the colorspace of the video with which the
-+ * subtitle was muxed.
-+ *
-+ * Subtitle authors worked around this issue by adjusting the color
-+ * to look as intended *after* going through the mangling process. Still,
-+ * this behaviour isn't great and also limits the color range. Yet,
-+ * for backwards compatibility with existing files, the classic mangling
-+ * must be preserved for existing files to not break the display of
-+ * color-matched typesets created with older VSFilter versions. Thus,
-+ * on iniative of xy-VSFilter/XYSubFilter a new explicit "YCbCr Matrix"
-+ * header was introduced to allow new files to avoid this color mangling.
-+ * However due to a limitation of VSFilter API, VSFilters don't actually
-+ * know the real colorspace of the video they're rendering to, so the
-+ * header wasn't created as a simple "Use ColourMangling: yes/no", but instead
-+ * specifies exactly which colorspace to use for the initial conversion
-+ * from the subtitle's RGB values to the video's YCbCr. So we now got
-+ *
-+ *    screen_rgb = video_csp_to_rgb(rgb_to_ycbcr_header_csp(ass_rgb))
-+ *
-+ * with rgb_to_ycbcr_header_csp defaulting to TV-range BT.601.
-+ *
-+ * XySubFilter, whose API was planned during introduction of this header,
-+ * is not affected by this VSFilter-API limitation, so for it and other
-+ * renderers like libass an additional special value "None" was also added.
-+ * "None" tells the renderer to directly use untouched RGB values without
-+ * any conversion.
-+ *
-+ * If the video itself is already in RGB natively, then no color mangling
-+ * happens regardless of the presence or value of a "YCbCr Matrix" header.
-+ *
-+ * The above mangling process with special value "None" to opt out
-+ * of any color mangling is the recommended default behaviour.
-+ *
-+ * Keep in mind though, that xy-VSFilter cannot accurately implement this and
-+ * will instead resort to a guessing the video colorspace based on resolution
-+ * and then convert RGB to the guessed space.
-+ * Also some versions of MPC-HC's Internal Subtitle Renderer don't implement
-+ * "None" and use TV.601 for unknown, but the video colorspace for no or an
-+ * empty header (which can break old subtitles).
-+ *
-+ * Aegisub's (the main application to produce ASS subtitle scripts) behaviour
-+ * regarding colorspaces is unfortunately a bit confusing.
-+ * As of time of writing there still is a config option to force BT.601(TV)
-+ * in some active forks (which should not be used to author subs and serves
-+ * at most as a tool to check how now ancient VSFilters would have rendered the
-+ * subs), the automatically chosen colorspace may depend on the fork and the
-+ * videoprovider used and furthermore Aegisub likes to override
-+ * "YCbCr Matrix: None" with the autodetected space of a loaded video.
-+ * Supposedly some Aegisub versions had an option that "tries not to mangle the
-+ * colors". It was said that if the header is not set to BT.601(TV), the colors
-+ * were supposed not to be mangled, even if the header was not set to "None".
-+ *
-+ * In general, misinterpreting this header or not using it will lead to
-+ * slightly different subtitle colors, which can matter if the subtitle
-+ * attempts to match solid colored areas in the video.
-+ * It is recommended to stick to XySubFilter-like behaviour described above.
-+ * A highly motivated application may also expose options to users to  emulate
-+ * xy-VSFilter's resolution-depended guess or other (historic) mangling modes.
-+ * Completly ignoring the color mangling is likely to give bad results.
-+ *
-+ * Note that libass doesn't change colors based on this header. It
-+ * absolutely can't do that, because the video colorspace is required
-+ * in order to handle this as intended. API users must use the exposed
-+ * information to perform color mangling as described above.
-+ */
-+typedef enum ASS_YCbCrMatrix {
-+    YCBCR_DEFAULT = 0,  // Header missing
-+    YCBCR_UNKNOWN,      // Header could not be parsed correctly
-+    YCBCR_NONE,         // "None" special value
-+    YCBCR_BT601_TV,
-+    YCBCR_BT601_PC,
-+    YCBCR_BT709_TV,
-+    YCBCR_BT709_PC,
-+    YCBCR_SMPTE240M_TV,
-+    YCBCR_SMPTE240M_PC,
-+    YCBCR_FCC_TV,
-+    YCBCR_FCC_PC
-+    // New enum values can be added here in new ABI-compatible library releases.
-+} ASS_YCbCrMatrix;
-+
-+/*
-+ * ass track represent either an external script or a matroska subtitle stream
-+ * (no real difference between them); it can be used in rendering after the
-+ * headers are parsed (i.e. events format line read).
-+ */
-+typedef struct ass_track {
-+    int n_styles;           // amount used
-+    int max_styles;         // amount allocated
-+    int n_events;
-+    int max_events;
-+    ASS_Style *styles;    // array of styles, max_styles length, n_styles used
-+    ASS_Event *events;    // the same as styles
-+
-+    char *style_format;     // style format line (everything after "Format: ")
-+    char *event_format;     // event format line
-+
-+    enum {
-+        TRACK_TYPE_UNKNOWN = 0,
-+        TRACK_TYPE_ASS,
-+        TRACK_TYPE_SSA
-+    } track_type;
-+
-+    // Script header fields
-+    int PlayResX;
-+    int PlayResY;
-+    double Timer;
-+    int WrapStyle;
-+    int ScaledBorderAndShadow; // 0 or 1 (boolean)
-+    int Kerning; // 0 or 1 (boolean)
-+    char *Language; // zero-terminated ISO-639-1 code
-+    ASS_YCbCrMatrix YCbCrMatrix;
-+
-+    int default_style;      // index of default style
-+    char *name;             // file name in case of external subs, 0 for streams
-+
-+    ASS_Library *library;
-+    ASS_ParserPriv *parser_priv;
-+
-+    int LayoutResX;  // overrides values from ass_set_storage_size and
-+    int LayoutResY;  // also takes precendence over ass_set_pixel_aspect
-+
-+    // New fields can be added here in new ABI-compatible library releases.
-+} ASS_Track;
-+
-+#endif /* LIBASS_TYPES_H */
+-
+-// These PlayResX and PlayResY values are arbitrary and taken from lavc.
+-// lavc assumes these values when converting to ass generally. Moreover, these
+-// values are also used by default in VSFilter, so it isn't that arbitrary.
+-#define MP_ASS_FONT_PLAYRESX 384
+-#define MP_ASS_FONT_PLAYRESY 288
+-
+-#define MP_ASS_RGBA(r, g, b, a) \
+-    (((unsigned)(r) << 24) | ((g) << 16) | ((b) << 8) | (0xFF - (a)))
+-
+-// m_color argument
+-#define MP_ASS_COLOR(c) MP_ASS_RGBA((c).r, (c).g, (c).b, (c).a)
+-
+-struct MPOpts;
+-struct mpv_global;
+-struct mp_osd_res;
+-struct osd_style_opts;
+-struct mp_log;
+-
+-void mp_ass_flush_old_events(ASS_Track *track, long long ts);
+-void mp_ass_set_style(ASS_Style *style, double res_y,
+-                      const struct osd_style_opts *opts);
+-
+-void mp_ass_configure_fonts(ASS_Renderer *priv, struct osd_style_opts *opts,
+-                            struct mpv_global *global, struct mp_log *log);
+-ASS_Library *mp_ass_init(struct mpv_global *global,
+-                         struct osd_style_opts *opts, struct mp_log *log);
+-
+-struct sub_bitmaps;
+-struct mp_ass_packer;
+-struct mp_ass_packer *mp_ass_packer_alloc(void *ta_parent);
+-void mp_ass_packer_pack(struct mp_ass_packer *p, ASS_Image **image_lists,
+-                        int num_image_lists, bool changed, bool video_color_space,
+-                        int preferred_osd_format, struct sub_bitmaps *out);
+-void mp_ass_get_bb(ASS_Image *image_list, ASS_Track *track,
+-                   struct mp_osd_res *res, double *out_rc);
+-
+-#endif                          /* MPLAYER_ASS_MP_H */
 diff --git a/sub/osd_libass.c b/sub/osd_libass.c
-index 1687f14..23df4cc 100644
+deleted file mode 100644
+index 8e79bd8..0000000
 --- a/sub/osd_libass.c
-+++ b/sub/osd_libass.c
-@@ -47,21 +47,21 @@ void osd_init_backend(struct osd_state *osd)
- 
- static void create_ass_renderer(struct osd_state *osd, struct ass_state *ass)
- {
++++ /dev/null
+@@ -1,722 +0,0 @@
+-/*
+- * This file is part of mpv.
+- *
+- * mpv is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU Lesser General Public
+- * License as published by the Free Software Foundation; either
+- * version 2.1 of the License, or (at your option) any later version.
+- *
+- * mpv is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU Lesser General Public License for more details.
+- *
+- * You should have received a copy of the GNU Lesser General Public
+- * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
+- */
+-
+-#include <math.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <string.h>
+-#include <assert.h>
+-
+-#include "mpv_talloc.h"
+-#include "misc/bstr.h"
+-#include "common/common.h"
+-#include "common/msg.h"
+-#include "osd.h"
+-#include "osd_state.h"
+-
+-static const char osd_font_pfb[] =
+-#include "sub/osd_font.otf.inc"
+-;
+-
+-#include "sub/ass_mp.h"
+-#include "options/options.h"
+-
+-
+-#define ASS_USE_OSD_FONT "{\\fnmpv-osd-symbols}"
+-
+-static void append_ass(struct ass_state *ass, struct mp_osd_res *res,
+-                       ASS_Image **img_list, bool *changed);
+-
+-static void create_ass_renderer(struct osd_state *osd, struct ass_state *ass)
+-{
 -    if (ass->render)
 -        return;
-+    // if (ass->render)
-+    //     return;
- 
+-
 -    ass->log = mp_log_new(NULL, osd->log, "libass");
 -    ass->library = mp_ass_init(osd->global, osd->opts->osd_style, ass->log);
 -    ass_add_font(ass->library, "mpv-osd-symbols", (void *)osd_font_pfb,
 -                 sizeof(osd_font_pfb) - 1);
-+    // ass->log = mp_log_new(NULL, osd->log, "libass");
-+    // ass->library = mp_ass_init(osd->global, osd->opts->osd_style, ass->log);
-+    // ass_add_font(ass->library, "mpv-osd-symbols", (void *)osd_font_pfb,
-+    //              sizeof(osd_font_pfb) - 1);
- 
+-
 -    ass->render = ass_renderer_init(ass->library);
 -    if (!ass->render)
 -        abort();
-+    // ass->render = ass_renderer_init(ass->library);
-+    // if (!ass->render)
-+    //     abort();
- 
+-
 -    mp_ass_configure_fonts(ass->render, osd->opts->osd_style,
 -                           osd->global, ass->log);
 -    ass_set_pixel_aspect(ass->render, 1.0);
-+    // mp_ass_configure_fonts(ass->render, osd->opts->osd_style,
-+    //                        osd->global, ass->log);
-+    // ass_set_pixel_aspect(ass->render, 1.0);
- }
- 
- static void destroy_ass_renderer(struct ass_state *ass)
+-}
+-
+-static void destroy_ass_renderer(struct ass_state *ass)
+-{
+-    if (ass->track)
+-        ass_free_track(ass->track);
+-    ass->track = NULL;
+-    if (ass->render)
+-        ass_renderer_done(ass->render);
+-    ass->render = NULL;
+-    if (ass->library)
+-        ass_library_done(ass->library);
+-    ass->library = NULL;
+-    talloc_free(ass->log);
+-    ass->log = NULL;
+-}
+-
+-static void destroy_external(struct osd_external *ext)
+-{
+-    destroy_ass_renderer(&ext->ass);
+-    talloc_free(ext);
+-}
+-
+-void osd_destroy_backend(struct osd_state *osd)
+-{
+-    for (int n = 0; n < MAX_OSD_PARTS; n++) {
+-        struct osd_object *obj = osd->objs[n];
+-        destroy_ass_renderer(&obj->ass);
+-        for (int i = 0; i < obj->num_externals; i++)
+-            destroy_external(obj->externals[i]);
+-        obj->num_externals = 0;
+-    }
+-}
+-
+-static void update_playres(struct ass_state *ass, struct mp_osd_res *vo_res)
+-{
+-    ASS_Track *track = ass->track;
+-    int old_res_x = track->PlayResX;
+-    int old_res_y = track->PlayResY;
+-
+-    ass->vo_res = *vo_res;
+-
+-    double aspect = 1.0 * vo_res->w / MPMAX(vo_res->h, 1);
+-    if (vo_res->display_par > 0)
+-        aspect = aspect / vo_res->display_par;
+-
+-    track->PlayResY = ass->res_y ? ass->res_y : MP_ASS_FONT_PLAYRESY;
+-    track->PlayResX = ass->res_x ? ass->res_x : track->PlayResY * aspect;
+-
+-    // Force libass to clear its internal cache - it doesn't check for
+-    // PlayRes changes itself.
+-    if (old_res_x != track->PlayResX || old_res_y != track->PlayResY)
+-        ass_set_frame_size(ass->render, 1, 1);
+-}
+-
+-static void create_ass_track(struct osd_state *osd, struct osd_object *obj,
+-                             struct ass_state *ass)
+-{
+-    create_ass_renderer(osd, ass);
+-
+-    ASS_Track *track = ass->track;
+-    struct mp_osd_render_opts *opts = osd->opts;
+-    if (!track)
+-        track = ass->track = ass_new_track(ass->library);
+-
+-    track->track_type = TRACK_TYPE_ASS;
+-    track->Timer = 100.;
+-    track->WrapStyle = 1; // end-of-line wrapping instead of smart wrapping
+-    track->Kerning = true;
+-    track->ScaledBorderAndShadow = true;
+-    ass_set_shaper(ass->render, opts->osd_shaper);
+-#if LIBASS_VERSION >= 0x01600010
+-    ass_track_set_feature(track, ASS_FEATURE_WRAP_UNICODE, 1);
+-#endif
+-#if LIBASS_VERSION >= 0x01703010
+-    ass_configure_prune(track, opts->osd_ass_prune_delay * 1000.0);
+-#endif
+-    ass_set_cache_limits(ass->render, opts->osd_glyph_limit, opts->osd_bitmap_max_size);
+-    update_playres(ass, &obj->vo_res);
+-}
+-
+-static int find_style(ASS_Track *track, const char *name, int def)
+-{
+-    for (int n = 0; n < track->n_styles; n++) {
+-        if (track->styles[n].Name && strcmp(track->styles[n].Name, name) == 0)
+-            return n;
+-    }
+-    return def;
+-}
+-
+-// Find a given style, or add it if it's missing.
+-static ASS_Style *get_style(struct ass_state *ass, char *name)
+-{
+-    ASS_Track *track = ass->track;
+-    if (!track)
+-        return NULL;
+-
+-    int sid = find_style(track, name, -1);
+-    if (sid >= 0)
+-        return &track->styles[sid];
+-
+-    sid = ass_alloc_style(track);
+-    ASS_Style *style = &track->styles[sid];
+-    style->Name = strdup(name);
+-    // Set to neutral base direction, as opposed to VSFilter LTR default
+-    style->Encoding = -1;
+-    return style;
+-}
+-
+-static ASS_Event *add_osd_ass_event(ASS_Track *track, const char *style,
+-                                    bstr text)
+-{
+-    int n = ass_alloc_event(track);
+-    ASS_Event *event = track->events + n;
+-    event->Start = 0;
+-    event->Duration = 100;
+-    event->Style = find_style(track, style, 0);
+-    event->ReadOrder = n;
+-    mp_assert(event->Text == NULL);
+-    if (text.start) {
+-        event->Text = malloc(text.len + 1);
+-        MP_HANDLE_OOM(event->Text);
+-        memcpy(event->Text, text.start, text.len);
+-        event->Text[text.len] = '\0';
+-    }
+-    return event;
+-}
+-
+-static void clear_ass(struct ass_state *ass)
+-{
+-    if (ass->track)
+-        ass_flush_events(ass->track);
+-}
+-
+-void osd_get_function_sym(char *buffer, size_t buffer_size, int osd_function)
+-{
+-    snprintf(buffer, buffer_size, OSD_CODEPOINTS_ESCAPE "%c", osd_function);
+-}
+-
+-void osd_mangle_ass(bstr *dst, const char *in, bool replace_newlines)
+-{
+-    const char *start = in;
+-    bool escape_ass = true;
+-    while (*in) {
+-        // As used by osd_get_function_sym().
+-        size_t len = strlen(OSD_CODEPOINTS_ESCAPE);
+-        if (!strncmp(in, OSD_CODEPOINTS_ESCAPE, len) && in[len]) {
+-            bstr_xappend(NULL, dst, bstr0(ASS_USE_OSD_FONT));
+-            mp_append_utf8_bstr(NULL, dst, OSD_CODEPOINTS + in[len]);
+-            bstr_xappend(NULL, dst, bstr0("{\\r}"));
+-            in += len + 1;
+-            continue;
+-        }
+-        len = strlen(OSD_ASS_0);
+-        if (!strncmp(in, OSD_ASS_0, len)) {
+-            escape_ass = false;
+-            in += len;
+-            continue;
+-        }
+-        len = strlen(OSD_ASS_1);
+-        if (!strncmp(in, OSD_ASS_1, len)) {
+-            escape_ass = true;
+-            in += len;
+-            continue;
+-        }
+-        len = strlen(TERM_MSG_0);
+-        if (!strncmp(in, TERM_MSG_0, len)) {
+-            in += len;
+-            continue;
+-        }
+-        if (escape_ass && *in == '{')
+-            bstr_xappend(NULL, dst, bstr0("\\"));
+-        // Replace newlines with \N for escape-ass. This is necessary to apply
+-        // ASS tags past newlines and to preserve consecutive newlines with
+-        // osd-overlay because update_external() adds a ASS event per line.
+-        if (replace_newlines && *in == '\n') {
+-            bstr_xappend(NULL, dst, bstr0("\\N"));
+-            in += 1;
+-            continue;
+-        }
+-        // Libass will strip leading whitespace
+-        if (in[0] == ' ' && (in == start || in[-1] == '\n')) {
+-            bstr_xappend(NULL, dst, bstr0("\\h"));
+-            in += 1;
+-            continue;
+-        }
+-        bstr_xappend(NULL, dst, (bstr){(char *)in, 1});
+-        // Break ASS escapes with U+2060 WORD JOINER
+-        if (escape_ass && *in == '\\')
+-            mp_append_utf8_bstr(NULL, dst, 0x2060);
+-        in++;
+-    }
+-}
+-
+-static ASS_Event *add_osd_ass_event_escaped(ASS_Track *track, const char *style,
+-                                            const char *text)
+-{
+-    bstr buf = {0};
+-    osd_mangle_ass(&buf, text, false);
+-    ASS_Event *e = add_osd_ass_event(track, style, buf);
+-    talloc_free(buf.start);
+-    return e;
+-}
+-
+-static ASS_Style *prepare_osd_ass(struct osd_state *osd, struct osd_object *obj)
+-{
+-    struct mp_osd_render_opts *opts = osd->opts;
+-
+-    create_ass_track(osd, obj, &obj->ass);
+-
+-    struct osd_style_opts font = *opts->osd_style;
+-    font.font_size *= opts->osd_scale;
+-
+-    double playresy = obj->ass.track->PlayResY;
+-    // Compensate for libass and mp_ass_set_style scaling the font etc.
+-    if (!opts->osd_scale_by_window && obj->vo_res.h)
+-        playresy *= 720.0 / obj->vo_res.h;
+-
+-    ASS_Style *style = get_style(&obj->ass, "OSD");
+-    mp_ass_set_style(style, playresy, &font);
+-    return style;
+-}
+-
+-static void update_osd_text(struct osd_state *osd, struct osd_object *obj)
+-{
+-
+-    if (!obj->text[0])
+-        return;
+-
+-    prepare_osd_ass(osd, obj);
+-    add_osd_ass_event_escaped(obj->ass.track, "OSD", obj->text);
+-}
+-
+-void osd_get_text_size(struct osd_state *osd, int *out_screen_h, int *out_font_h)
+-{
+-    mp_mutex_lock(&osd->lock);
+-    struct osd_object *obj = osd->objs[OSDTYPE_OSD];
+-    ASS_Style *style = prepare_osd_ass(osd, obj);
+-    *out_screen_h = obj->ass.track->PlayResY - style->MarginV;
+-    *out_font_h = style->FontSize;
+-    mp_mutex_unlock(&osd->lock);
+-}
+-
+-// align: -1 .. +1
+-// frame: size of the containing area
+-// obj: size of the object that should be positioned inside the area
+-// margin: min. distance from object to frame (as long as -1 <= align <= +1)
+-static float get_align(float align, float frame, float obj, float margin)
+-{
+-    frame -= margin * 2;
+-    return margin + frame / 2 - obj / 2 + (frame - obj) / 2 * align;
+-}
+-
+-struct ass_draw {
+-    int scale;
+-    char *text;
+-};
+-
+-static void ass_draw_start(struct ass_draw *d)
+-{
+-    d->scale = MPMAX(d->scale, 1);
+-    d->text = talloc_asprintf_append(d->text, "{\\p%d}", d->scale);
+-}
+-
+-static void ass_draw_stop(struct ass_draw *d)
+-{
+-    d->text = talloc_strdup_append(d->text, "{\\p0}");
+-}
+-
+-static void ass_draw_c(struct ass_draw *d, float x, float y)
+-{
+-    int ix = round(x * (1 << (d->scale - 1)));
+-    int iy = round(y * (1 << (d->scale - 1)));
+-    d->text = talloc_asprintf_append(d->text, " %d %d", ix, iy);
+-}
+-
+-static void ass_draw_append(struct ass_draw *d, const char *t)
+-{
+-    d->text = talloc_strdup_append(d->text, t);
+-}
+-
+-static void ass_draw_move_to(struct ass_draw *d, float x, float y)
+-{
+-    ass_draw_append(d, " m");
+-    ass_draw_c(d, x, y);
+-}
+-
+-static void ass_draw_line_to(struct ass_draw *d, float x, float y)
+-{
+-    ass_draw_append(d, " l");
+-    ass_draw_c(d, x, y);
+-}
+-
+-static void ass_draw_rect_ccw(struct ass_draw *d, float x0, float y0,
+-                              float x1, float y1)
+-{
+-    ass_draw_move_to(d, x0, y0);
+-    ass_draw_line_to(d, x0, y1);
+-    ass_draw_line_to(d, x1, y1);
+-    ass_draw_line_to(d, x1, y0);
+-}
+-
+-static void ass_draw_rect_cw(struct ass_draw *d, float x0, float y0,
+-                             float x1, float y1)
+-{
+-    ass_draw_move_to(d, x0, y0);
+-    ass_draw_line_to(d, x1, y0);
+-    ass_draw_line_to(d, x1, y1);
+-    ass_draw_line_to(d, x0, y1);
+-}
+-
+-static void ass_draw_reset(struct ass_draw *d)
+-{
+-    talloc_free(d->text);
+-    d->text = NULL;
+-}
+-
+-static void get_osd_bar_box(struct osd_state *osd, struct osd_object *obj,
+-                            float *o_x, float *o_y, float *o_w, float *o_h,
+-                            float *o_border)
+-{
+-    struct mp_osd_render_opts *opts = osd->opts;
+-    struct osd_bar_style_opts *bar_opts = opts->osd_bar_style;
+-
+-    create_ass_track(osd, obj, &obj->ass);
+-    ASS_Track *track = obj->ass.track;
+-
+-    ASS_Style *style = get_style(&obj->ass, "progbar");
+-    if (!style) {
+-        *o_x = *o_y = *o_w = *o_h = *o_border = 0;
+-        return;
+-    }
+-
+-    mp_ass_set_style(style, track->PlayResY, opts->osd_style);
+-
+-    // override the default osd opaque-box into plain outline. Otherwise
+-    // the opaque box is not aligned with the bar (even without shadow),
+-    // and each bar ass event gets its own opaque box - breaking the bar.
+-    style->BorderStyle = 1; // outline
+-
+-    *o_w = track->PlayResX * (bar_opts->w / 100.0);
+-    *o_h = track->PlayResY * (bar_opts->h / 100.0);
+-
+-    style->Outline = bar_opts->outline_size;
+-    // Rendering with shadow is broken (because there's more than one shape)
+-    style->Shadow = 0;
+-    style->Blur = 0;
+-
+-    style->Alignment = 5;
+-
+-    *o_border = style->Outline;
+-
+-    *o_x = get_align(bar_opts->align_x, track->PlayResX, *o_w, *o_border);
+-    *o_y = get_align(bar_opts->align_y, track->PlayResY, *o_h, *o_border);
+-}
+-
+-static void update_progbar(struct osd_state *osd, struct osd_object *obj)
+-{
+-    if (obj->progbar_state.type < 0)
+-        return;
+-
+-    float px, py, width, height, border;
+-    get_osd_bar_box(osd, obj, &px, &py, &width, &height, &border);
+-
+-    ASS_Track *track = obj->ass.track;
+-
+-    float sx = px - border * 2 - height / 4; // includes additional spacing
+-    float sy = py + height / 2;
+-
+-    bstr buf = bstr0(talloc_asprintf(NULL, "{\\an6\\pos(%f,%f)}", sx, sy));
+-
+-    if (obj->progbar_state.type == 0 || obj->progbar_state.type >= 256) {
+-        // no sym
+-    } else if (obj->progbar_state.type >= 32) {
+-        mp_append_utf8_bstr(NULL, &buf, obj->progbar_state.type);
+-    } else {
+-        bstr_xappend(NULL, &buf, bstr0(ASS_USE_OSD_FONT));
+-        mp_append_utf8_bstr(NULL, &buf, OSD_CODEPOINTS + obj->progbar_state.type);
+-        bstr_xappend(NULL, &buf, bstr0("{\\r}"));
+-    }
+-
+-    add_osd_ass_event(track, "progbar", buf);
+-    talloc_free(buf.start);
+-
+-    struct ass_draw *d = &(struct ass_draw) { .scale = 4 };
+-
+-    if (osd->opts->osd_style->back_color.a && osd->opts->osd_style->border_style != 1) {
+-        // the bar style always ignores the --osd-back-color config - it messes
+-        // up the bar. draw an artificial box at the original back color.
+-        struct m_color bc = osd->opts->osd_style->back_color;
+-        d->text = talloc_asprintf_append(d->text,
+-            "{\\pos(%f,%f)\\bord0\\1a&H%02X\\1c&H%02X%02X%02X&}",
+-             px, py, 255 - bc.a, (int)bc.b, (int)bc.g, (int)bc.r);
+-
+-        ass_draw_start(d);
+-        ass_draw_rect_cw(d, -border, -border, width + border, height + border);
+-        ass_draw_stop(d);
+-        add_osd_ass_event(track, "progbar", bstr0(d->text));
+-        ass_draw_reset(d);
+-    }
+-
+-    // filled area
+-    d->text = talloc_asprintf_append(d->text, "{\\bord0\\pos(%f,%f)}", px, py);
+-    ass_draw_start(d);
+-    float pos = obj->progbar_state.value * width - border / 2;
+-    ass_draw_rect_cw(d, 0, 0, pos, height);
+-    ass_draw_stop(d);
+-    add_osd_ass_event(track, "progbar", bstr0(d->text));
+-    ass_draw_reset(d);
+-
+-    // position marker
+-    d->text = talloc_asprintf_append(d->text, "{\\bord%f\\pos(%f,%f)}",
+-                                     border / 2, px, py);
+-    ass_draw_start(d);
+-    ass_draw_move_to(d, pos + border / 2, 0);
+-    ass_draw_line_to(d, pos + border / 2, height);
+-    ass_draw_stop(d);
+-    add_osd_ass_event(track, "progbar", bstr0(d->text));
+-    ass_draw_reset(d);
+-
+-    d->text = talloc_asprintf_append(d->text, "{\\pos(%f,%f)}", px, py);
+-    ass_draw_start(d);
+-
+-    // the box
+-    ass_draw_rect_cw(d, -border, -border, width + border, height + border);
+-
+-    // the "hole"
+-    ass_draw_rect_ccw(d, 0, 0, width, height);
+-
+-    struct osd_bar_style_opts *bar_opts = osd->opts->osd_bar_style;
+-    // chapter marks
+-    if (bar_opts->marker_style) {
+-        for (int n = 0; n < obj->progbar_state.num_stops; n++) {
+-            float s = obj->progbar_state.stops[n] * width;
+-            float size = MPMAX(border * bar_opts->marker_scale,
+-                               bar_opts->marker_min_size);
+-
+-            if (bar_opts->marker_style == 2 &&
+-                s > size / 2 && s < width - size / 2)
+-            { // line
+-                ass_draw_rect_cw(d, s - size / 2, 0, s + size / 2, height);
+-            } else if (s > size && s < width - size) { //triangle
+-                ass_draw_move_to(d, s + size, 0);
+-                ass_draw_line_to(d, s,        size);
+-                ass_draw_line_to(d, s - size, 0);
+-
+-                ass_draw_move_to(d, s - size, height);
+-                ass_draw_line_to(d, s,        height - size);
+-                ass_draw_line_to(d, s + size, height);
+-            }
+-        }
+-    }
+-
+-    ass_draw_stop(d);
+-    add_osd_ass_event(track, "progbar", bstr0(d->text));
+-    ass_draw_reset(d);
+-}
+-
+-static void update_osd(struct osd_state *osd, struct osd_object *obj)
+-{
+-    obj->osd_changed = false;
+-    clear_ass(&obj->ass);
+-    update_osd_text(osd, obj);
+-    update_progbar(osd, obj);
+-}
+-
+-static void update_external(struct osd_state *osd, struct osd_object *obj,
+-                            struct osd_external *ext)
+-{
+-    bstr t = bstr0(ext->ov.data);
+-    ext->ass.res_x = ext->ov.res_x;
+-    ext->ass.res_y = ext->ov.res_y;
+-    create_ass_track(osd, obj, &ext->ass);
+-
+-    clear_ass(&ext->ass);
+-
+-    int resy = ext->ass.track->PlayResY;
+-    mp_ass_set_style(get_style(&ext->ass, "OSD"), resy, osd->opts->osd_style);
+-
+-    // Some scripts will reference this style name with \r tags.
+-    const struct osd_style_opts *def = osd_style_conf.defaults;
+-    mp_ass_set_style(get_style(&ext->ass, "Default"), resy, def);
+-
+-    while (t.len) {
+-        bstr line;
+-        bstr_split_tok(t, "\n", &line, &t);
+-        if (line.len)
+-            add_osd_ass_event(ext->ass.track, "OSD", line);
+-    }
+-}
+-
+-static int cmp_zorder(const void *pa, const void *pb)
+-{
+-    const struct osd_external *a = *(struct osd_external **)pa;
+-    const struct osd_external *b = *(struct osd_external **)pb;
+-    return a->ov.z == b->ov.z ? 0 : (a->ov.z > b->ov.z ? 1 : -1);
+-}
+-
+-void osd_set_external(struct osd_state *osd, struct osd_external_ass *ov)
+-{
+-    mp_mutex_lock(&osd->lock);
+-    struct osd_object *obj = osd->objs[OSDTYPE_EXTERNAL];
+-    bool zorder_changed = false;
+-    int index = -1;
+-
+-    for (int n = 0; n < obj->num_externals; n++) {
+-        struct osd_external *e = obj->externals[n];
+-        if (e->ov.id == ov->id && e->ov.owner == ov->owner) {
+-            index = n;
+-            break;
+-        }
+-    }
+-
+-    if (index < 0) {
+-        if (!ov->format)
+-            goto done;
+-        struct osd_external *new = talloc_zero(NULL, struct osd_external);
+-        new->ov.owner = ov->owner;
+-        new->ov.id = ov->id;
+-        MP_TARRAY_APPEND(obj, obj->externals, obj->num_externals, new);
+-        index = obj->num_externals - 1;
+-        zorder_changed = true;
+-    }
+-
+-    struct osd_external *entry = obj->externals[index];
+-
+-    if (!ov->format) {
+-        if (!entry->ov.hidden) {
+-            obj->changed = true;
+-            osd->want_redraw_notification = true;
+-        }
+-        destroy_external(entry);
+-        MP_TARRAY_REMOVE_AT(obj->externals, obj->num_externals, index);
+-        goto done;
+-    }
+-
+-    if (!entry->ov.hidden || !ov->hidden) {
+-        obj->changed = true;
+-        osd->want_redraw_notification = true;
+-    }
+-
+-    entry->ov.format = ov->format;
+-    if (!entry->ov.data)
+-        entry->ov.data = talloc_strdup(entry, "");
+-    entry->ov.data[0] = '\0'; // reuse memory allocation
+-    entry->ov.data = talloc_strdup_append(entry->ov.data, ov->data);
+-    entry->ov.res_x = ov->res_x;
+-    entry->ov.res_y = ov->res_y;
+-    zorder_changed |= entry->ov.z != ov->z;
+-    entry->ov.z = ov->z;
+-    entry->ov.hidden = ov->hidden;
+-
+-    update_external(osd, obj, entry);
+-
+-    if (zorder_changed) {
+-        qsort(obj->externals, obj->num_externals, sizeof(obj->externals[0]),
+-              cmp_zorder);
+-    }
+-
+-    if (ov->out_rc) {
+-        struct mp_osd_res vo_res = entry->ass.vo_res;
+-        // Defined fallback if VO has not drawn this yet
+-        if (vo_res.w < 1 || vo_res.h < 1) {
+-            vo_res = (struct mp_osd_res){
+-                .w = entry->ov.res_x,
+-                .h = entry->ov.res_y,
+-                .display_par = 1,
+-            };
+-            // According to osd-overlay command description.
+-            if (vo_res.w < 1)
+-                vo_res.w = 1280;
+-            if (vo_res.h < 1)
+-                vo_res.h = 720;
+-        }
+-
+-        ASS_Image *img_list = NULL;
+-        append_ass(&entry->ass, &vo_res, &img_list, NULL);
+-
+-        mp_ass_get_bb(img_list, entry->ass.track, &vo_res, ov->out_rc);
+-    }
+-
+-done:
+-    mp_mutex_unlock(&osd->lock);
+-}
+-
+-void osd_set_external_remove_owner(struct osd_state *osd, void *owner)
+-{
+-    mp_mutex_lock(&osd->lock);
+-    struct osd_object *obj = osd->objs[OSDTYPE_EXTERNAL];
+-    for (int n = obj->num_externals - 1; n >= 0; n--) {
+-        struct osd_external *e = obj->externals[n];
+-        if (e->ov.owner == owner) {
+-            destroy_external(e);
+-            MP_TARRAY_REMOVE_AT(obj->externals, obj->num_externals, n);
+-            obj->changed = true;
+-            osd->want_redraw_notification = true;
+-        }
+-    }
+-    mp_mutex_unlock(&osd->lock);
+-}
+-
+-static void append_ass(struct ass_state *ass, struct mp_osd_res *res,
+-                       ASS_Image **img_list, bool *changed)
+-{
+-    if (!ass->render || !ass->track) {
+-        *img_list = NULL;
+-        return;
+-    }
+-
+-    update_playres(ass, res);
+-
+-    ass_set_frame_size(ass->render, res->w, res->h);
+-    ass_set_pixel_aspect(ass->render, res->display_par);
+-
+-    int ass_changed;
+-    *img_list = ass_render_frame(ass->render, ass->track, 0, &ass_changed);
+-
+-    ass->changed |= ass_changed;
+-
+-    if (changed) {
+-        *changed |= ass->changed;
+-        ass->changed = false;
+-    }
+-}
+-
+-struct sub_bitmaps *osd_object_get_bitmaps(struct osd_state *osd,
+-                                           struct osd_object *obj, int format)
+-{
+-    if (obj->type == OSDTYPE_OSD) {
+-        if (obj->osd_changed) {
+-            update_osd(osd, obj);
+-        } else {
+-            mp_require(obj->ass_packer);
+-            goto done;
+-        }
+-    }
+-
+-    if (!obj->ass_packer)
+-        obj->ass_packer = mp_ass_packer_alloc(obj);
+-
+-    MP_TARRAY_GROW(obj, obj->ass_imgs, obj->num_externals + 1);
+-
+-    append_ass(&obj->ass, &obj->vo_res, &obj->ass_imgs[0], &obj->changed);
+-    for (int n = 0; n < obj->num_externals; n++) {
+-        if (obj->externals[n]->ov.hidden) {
+-            update_playres(&obj->externals[n]->ass, &obj->vo_res);
+-            obj->ass_imgs[n + 1] = NULL;
+-        } else {
+-            append_ass(&obj->externals[n]->ass, &obj->vo_res,
+-                       &obj->ass_imgs[n + 1], &obj->changed);
+-        }
+-    }
+-
+-done:;
+-    struct sub_bitmaps out_imgs = {0};
+-    mp_ass_packer_pack(obj->ass_packer, obj->ass_imgs, obj->num_externals + 1,
+-                       obj->changed, false, format, &out_imgs);
+-
+-    obj->changed = false;
+-
+-    return sub_bitmaps_copy(&obj->copy_cache, &out_imgs);
+-}
 diff --git a/sub/sd_ass.c b/sub/sd_ass.c
-index e4e5652..0e55f7f 100644
+deleted file mode 100644
+index ece372a..0000000
 --- a/sub/sd_ass.c
-+++ b/sub/sd_ass.c
-@@ -22,7 +22,7 @@
- #include <limits.h>
- 
- #include <libavutil/common.h>
++++ /dev/null
+@@ -1,1215 +0,0 @@
+-/*
+- * This file is part of mpv.
+- *
+- * mpv is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU Lesser General Public
+- * License as published by the Free Software Foundation; either
+- * version 2.1 of the License, or (at your option) any later version.
+- *
+- * mpv is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU Lesser General Public License for more details.
+- *
+- * You should have received a copy of the GNU Lesser General Public
+- * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
+- */
+-
+-#include <stdlib.h>
+-#include <assert.h>
+-#include <string.h>
+-#include <math.h>
+-#include <limits.h>
+-
+-#include <libavutil/common.h>
 -#include <ass/ass.h>
-+// #include <ass/ass.h>
- 
- #include "mpv_talloc.h"
- 
-@@ -205,41 +205,41 @@ static void enable_output(struct sd *sd, bool enable)
- 
- static void assobjects_init(struct sd *sd)
- {
+-
+-#include "mpv_talloc.h"
+-
+-#include "config.h"
+-#include "options/m_config.h"
+-#include "options/options.h"
+-#include "options/path.h"
+-#include "common/common.h"
+-#include "common/msg.h"
+-#include "demux/demux.h"
+-#include "demux/packet_pool.h"
+-#include "video/csputils.h"
+-#include "video/mp_image.h"
+-#include "dec_sub.h"
+-#include "ass_mp.h"
+-#include "sd.h"
+-
+-struct sd_ass_priv {
+-    struct ass_library *ass_library;
+-    struct ass_renderer *ass_renderer;
+-    struct ass_track *ass_track;
+-    struct ass_track *shadow_track; // for --sub-ass=no rendering
+-    bool ass_configured;
+-    bool is_converted;
+-    struct lavc_conv *converter;
+-    struct sd_filter **filters;
+-    int num_filters;
+-    bool clear_once;
+-    struct mp_ass_packer *packer;
+-    struct sub_bitmap_copy_cache *copy_cache;
+-    bstr last_text;
+-    struct mp_image_params video_params;
+-    struct mp_image_params last_params;
+-    struct mp_osd_res osd;
+-    struct seen_packet *seen_packets;
+-    int num_seen_packets;
+-    int *packets_animated;
+-    int num_packets_animated;
+-    bool check_animated;
+-};
+-
+-struct seen_packet {
+-    int64_t pos;
+-    double pts;
+-};
+-
+-#undef OPT_BASE_STRUCT
+-#define OPT_BASE_STRUCT struct mp_sub_filter_opts
+-
+-const struct m_sub_options mp_sub_filter_opts = {
+-    .opts = (const struct m_option[]){
+-        {"sdh", OPT_BOOL(sub_filter_SDH)},
+-        {"sdh-harder", OPT_BOOL(sub_filter_SDH_harder)},
+-        {"sdh-enclosures", OPT_STRINGLIST(sub_filter_SDH_enclosures)},
+-        {"regex-enable", OPT_BOOL(rf_enable)},
+-        {"regex-plain", OPT_BOOL(rf_plain)},
+-        {"regex", OPT_STRINGLIST(rf_items)},
+-        {"jsre", OPT_STRINGLIST(jsre_items)},
+-        {"regex-warn", OPT_BOOL(rf_warn)},
+-        {0}
+-    },
+-    .size = sizeof(OPT_BASE_STRUCT),
+-    .defaults = &(OPT_BASE_STRUCT){
+-        .sub_filter_SDH_enclosures = (char *[]) {
+-            "()",
+-            "[]",
+-            "\uFF08\uFF09",
+-            NULL
+-        },
+-        .rf_enable = true,
+-    },
+-    .change_flags = UPDATE_SUB_FILT,
+-};
+-
+-static void mangle_colors(struct sd *sd, struct sub_bitmaps *parts);
+-static void fill_plaintext(struct sd *sd, double pts);
+-
+-static const struct sd_filter_functions *const filters[] = {
+-    // Note: list order defines filter order.
+-    &sd_filter_sdh,
+-#if HAVE_POSIX
+-    &sd_filter_regex,
+-#endif
+-#if HAVE_JAVASCRIPT
+-    &sd_filter_jsre,
+-#endif
+-    NULL,
+-};
+-
+-// Add default styles, if the track does not have any styles yet.
+-// Apply style overrides if the user provides any.
+-static void mp_ass_add_default_styles(struct sd *sd, ASS_Track *track, struct mp_subtitle_opts *opts,
+-                                      struct mp_subtitle_shared_opts *shared_opts)
+-{
+-    if (opts->ass_styles_file && shared_opts->ass_style_override[sd->order]) {
+-        char *file = mp_get_user_path(NULL, sd->global, opts->ass_styles_file);
+-        ass_read_styles(track, file, NULL);
+-        talloc_free(file);
+-    }
+-
+-    if (track->n_styles == 0) {
+-        if (!track->PlayResY) {
+-            track->PlayResX = MP_ASS_FONT_PLAYRESX;
+-            track->PlayResY = MP_ASS_FONT_PLAYRESY;
+-        }
+-        track->Kerning = true;
+-        int sid = ass_alloc_style(track);
+-        track->default_style = sid;
+-        ASS_Style *style = track->styles + sid;
+-        style->Name = strdup("Default");
+-        mp_ass_set_style(style, track->PlayResY, opts->sub_style);
+-    }
+-
+-    if (shared_opts->ass_style_override[sd->order])
+-        ass_process_force_style(track);
+-}
+-
+-static const char *const font_mimetypes[] = {
+-    "application/x-truetype-font",
+-    "application/vnd.ms-opentype",
+-    "application/x-font-otf",
+-    "application/x-font-ttf",
+-    "application/x-font", // probably incorrect
+-    "application/font-sfnt",
+-    "font/collection",
+-    "font/otf",
+-    "font/sfnt",
+-    "font/ttf",
+-    NULL
+-};
+-
+-static const char *const font_exts[] = {".ttf", ".ttc", ".otf", ".otc", NULL};
+-
+-static bool attachment_is_font(struct mp_log *log, struct demux_attachment *f)
+-{
+-    if (!f->name || !f->type || !f->data || !f->data_size)
+-        return false;
+-    for (int n = 0; font_mimetypes[n]; n++) {
+-        if (strcmp(font_mimetypes[n], f->type) == 0)
+-            return true;
+-    }
+-    // fallback: match against file extension
+-    char *ext = strlen(f->name) > 4 ? f->name + strlen(f->name) - 4 : "";
+-    for (int n = 0; font_exts[n]; n++) {
+-        if (strcasecmp(ext, font_exts[n]) == 0) {
+-            mp_warn(log, "Loading font attachment '%s' with MIME type %s. "
+-                    "Assuming this is a broken Matroska file, which was "
+-                    "muxed without setting a correct font MIME type.\n",
+-                    f->name, f->type);
+-            return true;
+-        }
+-    }
+-    return false;
+-}
+-
+-static void add_subtitle_fonts(struct sd *sd)
+-{
 -    struct sd_ass_priv *ctx = sd->priv;
 -    struct mp_subtitle_opts *opts = sd->opts;
-+//     struct sd_ass_priv *ctx = sd->priv;
-+//     struct mp_subtitle_opts *opts = sd->opts;
- 
+-    if (!opts->ass_enabled || !opts->use_embedded_fonts || !sd->attachments)
+-        return;
+-    for (int i = 0; i < sd->attachments->num_entries; i++) {
+-        struct demux_attachment *f = &sd->attachments->entries[i];
+-        if (attachment_is_font(sd->log, f))
+-            ass_add_font(ctx->ass_library, f->name, f->data, f->data_size);
+-    }
+-}
+-
+-static void filters_destroy(struct sd *sd)
+-{
+-    struct sd_ass_priv *ctx = sd->priv;
+-
+-    for (int n = 0; n < ctx->num_filters; n++) {
+-        struct sd_filter *ft = ctx->filters[n];
+-        if (ft->driver->uninit)
+-            ft->driver->uninit(ft);
+-        talloc_free(ft);
+-    }
+-    ctx->num_filters = 0;
+-}
+-
+-static void filters_init(struct sd *sd)
+-{
+-    struct sd_ass_priv *ctx = sd->priv;
+-
+-    filters_destroy(sd);
+-
+-    for (int n = 0; filters[n]; n++) {
+-        struct sd_filter *ft = talloc_ptrtype(ctx, ft);
+-        *ft = (struct sd_filter){
+-            .global = sd->global,
+-            .log = sd->log,
+-            .packet_pool = demux_packet_pool_get(sd->global),
+-            .opts = mp_get_config_group(ft, sd->global, &mp_sub_filter_opts),
+-            .driver = filters[n],
+-            .codec = "ass",
+-            .event_format = talloc_strdup(ft, ctx->ass_track->event_format),
+-        };
+-        if (ft->driver->init(ft)) {
+-            MP_TARRAY_APPEND(ctx, ctx->filters, ctx->num_filters, ft);
+-        } else {
+-            talloc_free(ft);
+-        }
+-    }
+-}
+-
+-static void enable_output(struct sd *sd, bool enable)
+-{
+-    struct sd_ass_priv *ctx = sd->priv;
+-    if (enable == !!ctx->ass_renderer)
+-        return;
+-    if (ctx->ass_renderer) {
+-        ass_renderer_done(ctx->ass_renderer);
+-        ctx->ass_renderer = NULL;
+-    } else {
+-        ctx->ass_renderer = ass_renderer_init(ctx->ass_library);
+-
+-        mp_ass_configure_fonts(ctx->ass_renderer, sd->opts->sub_style,
+-                               sd->global, sd->log);
+-    }
+-}
+-
+-static void assobjects_init(struct sd *sd)
+-{
+-    struct sd_ass_priv *ctx = sd->priv;
+-    struct mp_subtitle_opts *opts = sd->opts;
+-    struct mp_subtitle_shared_opts *shared_opts = sd->shared_opts;
+-
 -    ctx->ass_library = mp_ass_init(sd->global, sd->opts->sub_style, sd->log);
 -    ass_set_extract_fonts(ctx->ass_library, opts->use_embedded_fonts);
-+//     ctx->ass_library = mp_ass_init(sd->global, sd->opts->sub_style, sd->log);
-+//     ass_set_extract_fonts(ctx->ass_library, opts->use_embedded_fonts);
- 
+-
 -    add_subtitle_fonts(sd);
-+//     add_subtitle_fonts(sd);
- 
--    if (opts->ass_style_override)
--        ass_set_style_overrides(ctx->ass_library, opts->ass_force_style_list);
-+//     if (opts->ass_style_override)
-+//         ass_set_style_overrides(ctx->ass_library, opts->ass_force_style_list);
- 
+-
+-    if (shared_opts->ass_style_override[sd->order])
+-        ass_set_style_overrides(ctx->ass_library, opts->ass_style_override_list);
+-
 -    ctx->ass_track = ass_new_track(ctx->ass_library);
 -    ctx->ass_track->track_type = TRACK_TYPE_ASS;
-+//     ctx->ass_track = ass_new_track(ctx->ass_library);
-+//     ctx->ass_track->track_type = TRACK_TYPE_ASS;
- 
+-
 -    ctx->shadow_track = ass_new_track(ctx->ass_library);
--    ctx->shadow_track->PlayResX = 384;
--    ctx->shadow_track->PlayResY = 288;
--    mp_ass_add_default_styles(ctx->shadow_track, opts);
-+//     ctx->shadow_track = ass_new_track(ctx->ass_library);
-+//     ctx->shadow_track->PlayResX = 384;
-+//     ctx->shadow_track->PlayResY = 288;
-+//     mp_ass_add_default_styles(ctx->shadow_track, opts);
- 
+-    ctx->shadow_track->PlayResX = MP_ASS_FONT_PLAYRESX;
+-    ctx->shadow_track->PlayResY = MP_ASS_FONT_PLAYRESY;
+-    mp_ass_add_default_styles(sd, ctx->shadow_track, opts, shared_opts);
+-
 -    char *extradata = sd->codec->extradata;
 -    int extradata_size = sd->codec->extradata_size;
 -    if (ctx->converter) {
@@ -1293,27 +1744,1263 @@ index e4e5652..0e55f7f 100644
 -    }
 -    if (extradata)
 -        ass_process_codec_private(ctx->ass_track, extradata, extradata_size);
-+//     char *extradata = sd->codec->extradata;
-+//     int extradata_size = sd->codec->extradata_size;
-+//     if (ctx->converter) {
-+//         extradata = lavc_conv_get_extradata(ctx->converter);
-+//         extradata_size = extradata ? strlen(extradata) : 0;
-+//     }
-+//     if (extradata)
-+//         ass_process_codec_private(ctx->ass_track, extradata, extradata_size);
- 
--    mp_ass_add_default_styles(ctx->ass_track, opts);
-+//     mp_ass_add_default_styles(ctx->ass_track, opts);
- 
+-
+-    mp_ass_add_default_styles(sd, ctx->ass_track, opts, shared_opts);
+-
 -#if LIBASS_VERSION >= 0x01302000
 -    ass_set_check_readorder(ctx->ass_track, sd->opts->sub_clear_on_seek ? 0 : 1);
 -#endif
-+// #if LIBASS_VERSION >= 0x01302000
-+//     ass_set_check_readorder(ctx->ass_track, sd->opts->sub_clear_on_seek ? 0 : 1);
-+// #endif
- 
+-
+-#if LIBASS_VERSION >= 0x01703010
+-    ass_configure_prune(ctx->ass_track, sd->opts->ass_prune_delay * 1000.0);
+-#endif
+-
 -    enable_output(sd, true);
-+//     enable_output(sd, true);
- }
- 
- static void assobjects_destroy(struct sd *sd)
+-    ass_set_cache_limits(ctx->ass_renderer, sd->opts->sub_glyph_limit, sd->opts->sub_bitmap_max_size);
+-}
+-
+-static void assobjects_destroy(struct sd *sd)
+-{
+-    struct sd_ass_priv *ctx = sd->priv;
+-
+-    ass_free_track(ctx->ass_track);
+-    ass_free_track(ctx->shadow_track);
+-    enable_output(sd, false);
+-    ass_library_done(ctx->ass_library);
+-}
+-
+-static int init(struct sd *sd)
+-{
+-    struct sd_ass_priv *ctx = talloc_zero(sd, struct sd_ass_priv);
+-    sd->priv = ctx;
+-
+-    // Note: accept "null" as alias for "ass", so EDL delay_open subtitle
+-    //       streams work.
+-    if (strcmp(sd->codec->codec, "ass") != 0 &&
+-        strcmp(sd->codec->codec, "null") != 0)
+-    {
+-        ctx->is_converted = true;
+-        ctx->converter = lavc_conv_create(sd);
+-        if (!ctx->converter)
+-            return -1;
+-    }
+-
+-    assobjects_init(sd);
+-    filters_init(sd);
+-
+-    ctx->packer = mp_ass_packer_alloc(ctx);
+-
+-    // Subtitles does not have any profile value, so put the converted type as a profile.
+-    const char *_Atomic *desc = ctx->converter ? &sd->codec->codec_profile : &sd->codec->codec_desc;
+-    switch (ctx->ass_track->track_type) {
+-    case TRACK_TYPE_ASS:
+-        *desc = "Advanced Sub Station Alpha";
+-        break;
+-    case TRACK_TYPE_SSA:
+-        *desc = "Sub Station Alpha";
+-        break;
+-    }
+-
+-    return 0;
+-}
+-
+-// Check if subtitle has events that would cause it to be animated inside {}
+-static bool is_animated(const char *str)
+-{
+-    const char *begin = str;
+-    while ((str = strchr(str, '{'))) {
+-        if (str++ > begin && str[-2] == '\\')
+-            continue;
+-
+-        const char *end = strchr(str, '}');
+-        if (!end)
+-            return false;
+-
+-        while ((str = memchr(str, '\\', end - str))) {
+-            while (str[0] == '\\')
+-                ++str;
+-            while (str[0] == ' ' || str[0] == '\t')
+-                ++str;
+-            if (str[0] == 'k' || str[0] == 'K' || str[0] == 't' ||
+-                (str[0] == 'f' && str[1] == 'a' && str[2] == 'd') ||
+-                (str[0] == 'm' && str[1] == 'o' && str[2] == 'v' && str[3] == 'e'))
+-            {
+-                return true;
+-            }
+-        }
+-
+-        str = end + 1;
+-    }
+-
+-    return false;
+-}
+-
+-// Note: pkt is not necessarily a fully valid refcounted packet.
+-static void filter_and_add(struct sd *sd, struct demux_packet *pkt)
+-{
+-    struct sd_ass_priv *ctx = sd->priv;
+-    struct demux_packet *orig_pkt = pkt;
+-    ASS_Track *track = ctx->ass_track;
+-    int old_n_events = track->n_events;
+-
+-    for (int n = 0; n < ctx->num_filters; n++) {
+-        struct sd_filter *ft = ctx->filters[n];
+-        struct demux_packet *npkt = ft->driver->filter(ft, pkt);
+-        if (pkt != npkt && pkt != orig_pkt)
+-            talloc_free(pkt);
+-        pkt = npkt;
+-        if (!pkt)
+-            return;
+-    }
+-
+-    ass_process_chunk(ctx->ass_track, pkt->buffer, pkt->len,
+-                      llrint(pkt->pts * 1000),
+-                      llrint(pkt->duration * 1000));
+-
+-    // This bookkeeping only has any practical use for ASS subs
+-    // over a VO with no video.
+-    if (!ctx->is_converted) {
+-        if (!pkt->seen) {
+-            for (int n = track->n_events - 1; n >= 0; n--) {
+-                if (n + 1 == old_n_events || pkt->animated == 1)
+-                    break;
+-                ASS_Event *event = &track->events[n];
+-                // Might as well mark pkt->animated here with effects if we can.
+-                pkt->animated = (event->Effect && event->Effect[0]) ? 1 : -1;
+-                if (ctx->check_animated && pkt->animated != 1)
+-                    pkt->animated = is_animated(event->Text);
+-            }
+-            MP_TARRAY_APPEND(ctx, ctx->packets_animated, ctx->num_packets_animated, pkt->animated);
+-        } else {
+-            if (ctx->check_animated && ctx->packets_animated[pkt->seen_pos] == -1) {
+-                for (int n = track->n_events - 1; n >= 0; n--) {
+-                    if (n + 1 == old_n_events || pkt->animated == 1)
+-                        break;
+-                    ASS_Event *event = &track->events[n];
+-                    ctx->packets_animated[pkt->seen_pos] = is_animated(event->Text);
+-                    pkt->animated = ctx->packets_animated[pkt->seen_pos];
+-                }
+-            } else {
+-                pkt->animated = ctx->packets_animated[pkt->seen_pos];
+-            }
+-        }
+-    }
+-
+-    if (pkt != orig_pkt)
+-        talloc_free(pkt);
+-}
+-
+-// Test if the packet with the given file position and pts was already consumed.
+-// Return false if the packet is new (and add it to the internal list), and
+-// return true if it was already seen.
+-static bool check_packet_seen(struct sd *sd, struct demux_packet *packet)
+-{
+-    struct sd_ass_priv *priv = sd->priv;
+-    int a = 0;
+-    int b = priv->num_seen_packets;
+-    while (a < b) {
+-        int mid = a + (b - a) / 2;
+-        struct seen_packet *seen_packet = &priv->seen_packets[mid];
+-        if (packet->pos == seen_packet->pos && packet->pts == seen_packet->pts) {
+-            packet->seen_pos = mid;
+-            return true;
+-        }
+-        if (packet->pos > seen_packet->pos ||
+-            (packet->pos == seen_packet->pos && packet->pts > seen_packet->pts)) {
+-            a = mid + 1;
+-        } else {
+-            b = mid;
+-        }
+-    }
+-    packet->seen_pos = a;
+-    MP_TARRAY_INSERT_AT(priv, priv->seen_packets, priv->num_seen_packets, a,
+-                        (struct seen_packet){packet->pos, packet->pts});
+-    return false;
+-}
+-
+-#define UNKNOWN_DURATION (INT_MAX / 1000)
+-
+-static void decode(struct sd *sd, struct demux_packet *packet)
+-{
+-    struct sd_ass_priv *ctx = sd->priv;
+-    ASS_Track *track = ctx->ass_track;
+-
+-    packet->sub_duration = packet->duration;
+-
+-    if (ctx->converter) {
+-        if (!sd->opts->sub_clear_on_seek && packet->pos >= 0 &&
+-            check_packet_seen(sd, packet))
+-            return;
+-
+-        double sub_pts = 0;
+-        double sub_duration = 0;
+-        char **r = lavc_conv_decode(ctx->converter, packet, &sub_pts,
+-                                    &sub_duration);
+-        if (sd->opts->sub_stretch_durations ||
+-            packet->duration < 0 || sub_duration == UINT32_MAX) {
+-            MP_VERBOSE(sd, "Subtitle with unknown duration.\n");
+-            sub_duration = UNKNOWN_DURATION;
+-        }
+-
+-        for (int n = 0; r && r[n]; n++) {
+-            struct demux_packet pkt2 = {
+-                .pts = sub_pts,
+-                .duration = sub_duration,
+-                .buffer = r[n],
+-                .len = strlen(r[n]),
+-            };
+-            filter_and_add(sd, &pkt2);
+-        }
+-        for (int n = track->n_events - 1; n >= 0; n--) {
+-            if (track->events[track->n_events - 1].Start == track->events[n].Start)
+-                continue;
+-            if (track->events[n].Duration == UNKNOWN_DURATION * 1000) {
+-                if (track->events[n].Start < track->events[n + 1].Start) {
+-                    track->events[n].Duration = track->events[n + 1].Start -
+-                                                track->events[n].Start;
+-                } else if (track->events[n].Start == track->events[n + 1].Start) {
+-                    track->events[n].Duration = track->events[n + 1].Duration;
+-                }
+-            }
+-            if (n > 0 && track->events[n].Start != track->events[n - 1].Start)
+-                break;
+-        }
+-    } else {
+-        // Note that for this packet format, libass has an internal mechanism
+-        // for discarding duplicate (already seen) packets but we check this
+-        // anyways for our purposes for ASS subtitles.
+-        packet->seen = check_packet_seen(sd, packet);
+-        filter_and_add(sd, packet);
+-    }
+-}
+-
+-// Calculate the height used for scaling subtitle text size so --sub-scale-with-window
+-// can undo this scale and use frame size instead. The algorithm used is the following:
+-// - If use_margins is disabled, the text is scaled with the visual size of the video.
+-// - If use_margins is enabled, the text is scaled with the size of the video
+-//   as if the video is resized to "fit" the size of the frame.
+-static float get_libass_scale_height(struct mp_osd_res *dim, bool use_margins)
+-{
+-    float vidw = dim->w - (dim->ml + dim->mr);
+-    float vidh = dim->h - (dim->mt + dim->mb);
+-    if (!use_margins || vidw < 1.0)
+-        return vidh;
+-    else
+-        return MPMIN(dim->h, dim->w / vidw * vidh);
+-}
+-
+-static void configure_ass(struct sd *sd, struct mp_osd_res *dim,
+-                          bool converted, ASS_Track *track)
+-{
+-    struct mp_subtitle_opts *opts = sd->opts;
+-    struct mp_subtitle_shared_opts *shared_opts = sd->shared_opts;
+-    struct sd_ass_priv *ctx = sd->priv;
+-    ASS_Renderer *priv = ctx->ass_renderer;
+-
+-    ass_set_frame_size(priv, dim->w, dim->h);
+-    ass_set_margins(priv, dim->mt, dim->mb, dim->ml, dim->mr);
+-
+-    bool set_use_margins = false;
+-    float set_sub_pos = 0.0f;
+-    float set_line_spacing = 0;
+-    float set_font_scale = 1;
+-    int set_hinting = 0;
+-    bool set_scale_with_window = false;
+-    bool set_scale_by_window = true;
+-    bool total_override = false;
+-    // With forced overrides, apply the --sub-* specific options
+-    if (converted || shared_opts->ass_style_override[sd->order] == ASS_STYLE_OVERRIDE_FORCE) {
+-        set_scale_with_window = opts->sub_scale_with_window;
+-        set_use_margins = opts->sub_use_margins;
+-        set_scale_by_window = opts->sub_scale_by_window;
+-        total_override = true;
+-    } else {
+-        set_scale_with_window = opts->ass_scale_with_window;
+-        set_use_margins = opts->ass_use_margins;
+-    }
+-    if (converted || shared_opts->ass_style_override[sd->order]) {
+-        set_sub_pos = 100.0f - shared_opts->sub_pos[sd->order];
+-        set_line_spacing = opts->sub_line_spacing;
+-        set_hinting = opts->sub_hinting;
+-    }
+-    if (total_override || shared_opts->ass_style_override[sd->order] == ASS_STYLE_OVERRIDE_SCALE) {
+-        set_font_scale = opts->sub_scale;
+-    }
+-    if (set_scale_with_window) {
+-        set_font_scale *= dim->h / MPMAX(get_libass_scale_height(dim, set_use_margins), 1);
+-    }
+-    if (!set_scale_by_window) {
+-        double factor = dim->h / 720.0;
+-        if (factor != 0.0)
+-            set_font_scale /= factor;
+-    }
+-    ass_set_use_margins(priv, set_use_margins);
+-    ass_set_line_position(priv, set_sub_pos);
+-    ass_set_shaper(priv, opts->sub_shaper);
+-    int set_force_flags = 0;
+-    if (total_override) {
+-        set_force_flags |= ASS_OVERRIDE_BIT_FONT_NAME
+-                            | ASS_OVERRIDE_BIT_FONT_SIZE_FIELDS
+-                            | ASS_OVERRIDE_BIT_COLORS
+-                            | ASS_OVERRIDE_BIT_BORDER;
+-        if (!opts->sub_scale_signs)
+-            set_force_flags |= ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE;
+-#if LIBASS_VERSION >= 0x01703020
+-        set_force_flags |= ASS_OVERRIDE_BIT_BLUR;
+-#endif
+-    }
+-    if (shared_opts->ass_style_override[sd->order] == ASS_STYLE_OVERRIDE_SCALE &&
+-        !opts->sub_scale_signs)
+-        set_force_flags |= ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE;
+-    if (converted)
+-        set_force_flags |= ASS_OVERRIDE_BIT_ALIGNMENT;
+-#if LIBASS_VERSION >= 0x01306000
+-    if ((converted || shared_opts->ass_style_override[sd->order]) && opts->ass_justify)
+-        set_force_flags |= ASS_OVERRIDE_BIT_JUSTIFY;
+-#endif
+-    ass_set_selective_style_override_enabled(priv, set_force_flags);
+-    ASS_Style style = {0};
+-    mp_ass_set_style(&style, MP_ASS_FONT_PLAYRESY, opts->sub_style);
+-    ass_set_selective_style_override(priv, &style);
+-    free(style.FontName);
+-    if (converted && track->default_style < track->n_styles) {
+-        mp_ass_set_style(track->styles + track->default_style,
+-                         track->PlayResY, opts->sub_style);
+-    }
+-    ass_set_font_scale(priv, set_font_scale);
+-    ass_set_hinting(priv, set_hinting);
+-    ass_set_line_spacing(priv, set_line_spacing);
+-#if LIBASS_VERSION >= 0x01600010
+-    if (converted) {
+-        ass_track_set_feature(track, ASS_FEATURE_WRAP_UNICODE, 1);
+-        if (!opts->sub_vsfilter_bidi_compat) {
+-            for (int n = 0; n < track->n_styles; n++) {
+-                track->styles[n].Encoding = -1;
+-            }
+-            ass_track_set_feature(track, ASS_FEATURE_BIDI_BRACKETS, 1);
+-            ass_track_set_feature(track, ASS_FEATURE_WHOLE_TEXT_LAYOUT, 1);
+-        }
+-    }
+-#endif
+-    if (converted) {
+-        bool override_playres = true;
+-        char **ass_style_override_list = opts->ass_style_override_list;
+-        for (int i = 0; ass_style_override_list && ass_style_override_list[i]; i++) {
+-            if (bstr_find0(bstr0(ass_style_override_list[i]), "PlayResX") >= 0)
+-                override_playres = false;
+-        }
+-
+-        // srt to ass conversion from ffmpeg has fixed PlayResX of 384 with an
+-        // aspect of 4:3. Starting with libass f08f8ea5 (pre 0.17) PlayResX
+-        // affects shadow and border widths, among others, so to render borders
+-        // and shadows correctly, we adjust PlayResX according to the DAR.
+-        // But PlayResX also affects margins, so we adjust those too.
+-        // This should ensure basic srt-to-ass ffmpeg conversion has correct
+-        // borders, but there could be other issues with some srt extensions
+-        // and/or different source formats which would be exposed over time.
+-        // Make these adjustments only if the user didn't set PlayResX.
+-        if (override_playres) {
+-            int vidw = dim->w - (dim->ml + dim->mr);
+-            int vidh = dim->h - (dim->mt + dim->mb);
+-            track->PlayResX = track->PlayResY * (double)vidw / MPMAX(vidh, 1);
+-            // ffmpeg and mpv use a default PlayResX of 384 when it is not known,
+-            // this comes from VSFilter.
+-            double fix_margins = track->PlayResX / (double)MP_ASS_FONT_PLAYRESX;
+-            for (int n = 0; n < track->n_styles; n++) {
+-                track->styles[n].MarginL = lrint(track->styles[n].MarginL * fix_margins);
+-                track->styles[n].MarginR = lrint(track->styles[n].MarginR * fix_margins);
+-                track->styles[n].MarginV = lrint(track->styles[n].MarginV * set_font_scale);
+-            }
+-        }
+-    }
+-}
+-
+-static bool has_overrides(char *s)
+-{
+-    if (!s)
+-        return false;
+-    return strstr(s, "\\pos") || strstr(s, "\\move") || strstr(s, "\\clip") ||
+-           strstr(s, "\\iclip") || strstr(s, "\\org") || strstr(s, "\\p");
+-}
+-
+-#define END(ev) ((ev)->Start + (ev)->Duration)
+-
+-static long long find_timestamp(struct sd *sd, double pts)
+-{
+-    struct sd_ass_priv *priv = sd->priv;
+-    if (pts == MP_NOPTS_VALUE)
+-        return 0;
+-
+-    long long ts = llrint(pts * 1000);
+-
+-    if (!sd->opts->sub_fix_timing ||
+-        sd->shared_opts->ass_style_override[sd->order] == ASS_STYLE_OVERRIDE_NONE)
+-        return ts;
+-
+-    // Try to fix small gaps and overlaps.
+-    ASS_Track *track = priv->ass_track;
+-    int threshold = sd->opts->sub_fix_timing_threshold;
+-    int keep = sd->opts->sub_fix_timing_keep;
+-
+-    // Find the "current" event.
+-    ASS_Event *ev[2] = {0};
+-    int n_ev = 0;
+-    for (int n = 0; n < track->n_events; n++) {
+-        ASS_Event *event = &track->events[n];
+-        if (ts >= event->Start - threshold && ts <= END(event) + threshold) {
+-            if (n_ev >= MP_ARRAY_SIZE(ev))
+-                return ts; // multiple overlaps - give up (probably complex subs)
+-            ev[n_ev++] = event;
+-        }
+-    }
+-
+-    if (n_ev != 2)
+-        return ts;
+-
+-    // Simple/minor heuristic against destroying typesetting.
+-    if (ev[0]->Style != ev[1]->Style || has_overrides(ev[0]->Text) ||
+-        has_overrides(ev[1]->Text))
+-        return ts;
+-
+-    // Sort by start timestamps.
+-    if (ev[0]->Start > ev[1]->Start)
+-        MPSWAP(ASS_Event*, ev[0], ev[1]);
+-
+-    // We want to fix partial overlaps only.
+-    if (END(ev[0]) >= END(ev[1]))
+-        return ts;
+-
+-    if (ev[0]->Duration < keep || ev[1]->Duration < keep)
+-        return ts;
+-
+-    // Gap between the events -> move ts to show the end of the first event.
+-    if (ts >= END(ev[0]) && ts < ev[1]->Start && END(ev[0]) < ev[1]->Start &&
+-        END(ev[0]) + threshold >= ev[1]->Start)
+-        return END(ev[0]) - 1;
+-
+-    // Overlap -> move ts to the (exclusive) end of the first event.
+-    // Relies on the fact that the ASS_Renderer has no overlap registered, even
+-    // if there is one. This happens to work because we never render the
+-    // overlapped state, and libass never resolves a collision.
+-    if (ts >= ev[1]->Start && ts <= END(ev[0]) && END(ev[0]) > ev[1]->Start &&
+-        END(ev[0]) <= ev[1]->Start + threshold)
+-        return END(ev[0]);
+-
+-    return ts;
+-}
+-
+-#undef END
+-
+-static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
+-                                       int format, double pts)
+-{
+-    struct sd_ass_priv *ctx = sd->priv;
+-    struct mp_subtitle_opts *opts = sd->opts;
+-    struct mp_subtitle_shared_opts *shared_opts = sd->shared_opts;
+-    bool no_ass = !opts->ass_enabled ||
+-        shared_opts->ass_style_override[sd->order] == ASS_STYLE_OVERRIDE_STRIP;
+-    bool converted = (ctx->is_converted && !lavc_conv_is_styled(ctx->converter)) || no_ass;
+-    ASS_Track *track = no_ass ? ctx->shadow_track : ctx->ass_track;
+-    ASS_Renderer *renderer = ctx->ass_renderer;
+-    struct sub_bitmaps *res = &(struct sub_bitmaps){0};
+-
+-    // Always update the osd_res
+-    struct mp_osd_res old_osd = ctx->osd;
+-    ctx->osd = dim;
+-
+-    if (pts == MP_NOPTS_VALUE || !renderer)
+-        goto done;
+-
+-    // Currently no supported text sub formats support a distinction between forced
+-    // and unforced lines, so we just assume everything's unforced and discard everything.
+-    // If we ever see a format that makes this distinction, we can add support here.
+-    if (opts->sub_forced_events_only)
+-        goto done;
+-
+-    double scale = dim.display_par;
+-    if (!converted && (!shared_opts->ass_style_override[sd->order] ||
+-                       opts->ass_use_video_data >= 1))
+-    {
+-        // Let's factor in video PAR for vsfilter compatibility:
+-        double par = opts->ass_video_aspect > 0 ?
+-                opts->ass_video_aspect :
+-                ctx->video_params.p_w / (double)ctx->video_params.p_h;
+-        if (isnormal(par))
+-            scale *= par;
+-    }
+-    if (!ctx->ass_configured || !osd_res_equals(old_osd, ctx->osd)) {
+-        configure_ass(sd, &dim, converted, track);
+-        ctx->ass_configured = true;
+-    }
+-    ass_set_pixel_aspect(renderer, scale);
+-    if (!converted && (!shared_opts->ass_style_override[sd->order] ||
+-                       opts->ass_use_video_data >= 2))
+-    {
+-        ass_set_storage_size(renderer, ctx->video_params.w, ctx->video_params.h);
+-    } else {
+-        ass_set_storage_size(renderer, 0, 0);
+-    }
+-    long long ts = find_timestamp(sd, pts);
+-
+-    if (no_ass)
+-        fill_plaintext(sd, pts);
+-
+-    int changed;
+-    ASS_Image *imgs = ass_render_frame(renderer, track, ts, &changed);
+-    mp_ass_packer_pack(ctx->packer, &imgs, 1, changed, !converted, format, res);
+-
+-done:
+-    // mangle_colors() modifies the color field, so copy the thing _before_.
+-    res = sub_bitmaps_copy(&ctx->copy_cache, res);
+-
+-    if (!converted && res)
+-        mangle_colors(sd, res);
+-
+-    return res;
+-}
+-
+-#define MAX_BUF_SIZE 1024 * 1024
+-#define MIN_EXPAND_SIZE 4096
+-
+-static void append(bstr *b, char c)
+-{
+-    bstr_xappend(NULL, b, (bstr){&c, 1});
+-}
+-
+-static void ass_to_plaintext(bstr *b, const char *in)
+-{
+-    const char *open_tag_pos = NULL;
+-    bool in_drawing = false;
+-    while (*in) {
+-        if (open_tag_pos) {
+-            if (in[0] == '}') {
+-                in += 1;
+-                open_tag_pos = NULL;
+-            } else if (in[0] == '\\' && in[1] == 'p' && in[2] != 'o') {
+-                in += 2;
+-                // Skip text between \pN and \p0 tags. A \p without a number
+-                // is the same as \p0, and leading 0s are also allowed.
+-                in_drawing = false;
+-                while (in[0] >= '0' && in[0] <= '9') {
+-                    if (in[0] != '0')
+-                        in_drawing = true;
+-                    in += 1;
+-                }
+-            } else {
+-                in += 1;
+-            }
+-        } else {
+-            if (in[0] == '\\' && (in[1] == 'N' || in[1] == 'n')) {
+-                in += 2;
+-                append(b, '\n');
+-            } else if (in[0] == '\\' && in[1] == 'h') {
+-                in += 2;
+-                append(b, ' ');
+-            } else if (in[0] == '{') {
+-                open_tag_pos = in;
+-                in += 1;
+-            } else {
+-                if (!in_drawing)
+-                    append(b, in[0]);
+-                in += 1;
+-            }
+-        }
+-    }
+-    // A '{' without a closing '}' is always visible.
+-    if (open_tag_pos) {
+-        bstr_xappend(NULL, b, bstr0(open_tag_pos));
+-    }
+-}
+-
+-// Empty string counts as whitespace.
+-static bool is_whitespace_only(bstr b)
+-{
+-    for (int n = 0; n < b.len; n++) {
+-        if (b.start[n] != ' ' && b.start[n] != '\t')
+-            return false;
+-    }
+-    return true;
+-}
+-
+-static bstr get_text_buf(struct sd *sd, double pts, enum sd_text_type type)
+-{
+-    struct sd_ass_priv *ctx = sd->priv;
+-    ASS_Track *track = ctx->ass_track;
+-
+-    if (pts == MP_NOPTS_VALUE)
+-        return (bstr){0};
+-    long long ipts = find_timestamp(sd, pts);
+-
+-    bstr *b = &ctx->last_text;
+-
+-    if (!b->start)
+-        b->start = talloc_size(ctx, 4096);
+-
+-    b->len = 0;
+-
+-    for (int i = 0; i < track->n_events; ++i) {
+-        ASS_Event *event = track->events + i;
+-        if (ipts >= event->Start && ipts < event->Start + event->Duration) {
+-            if (event->Text) {
+-                int start = b->len;
+-                if (type == SD_TEXT_TYPE_PLAIN) {
+-                    ass_to_plaintext(b, event->Text);
+-                } else if (type == SD_TEXT_TYPE_ASS_FULL) {
+-                    long long s = event->Start;
+-                    long long e = s + event->Duration;
+-
+-                    ASS_Style *style = (event->Style < 0 || event->Style >= track->n_styles) ? NULL : &track->styles[event->Style];
+-
+-                    int sh = (s / 60 / 60 / 1000);
+-                    int sm = (s / 60 / 1000) % 60;
+-                    int ss = (s / 1000) % 60;
+-                    int sc = (s / 10) % 100;
+-                    int eh = (e / 60 / 60 / 1000);
+-                    int em = (e / 60 / 1000) % 60;
+-                    int es = (e / 1000) % 60;
+-                    int ec = (e / 10) % 100;
+-
+-                    bstr_xappend_asprintf(NULL, b, "Dialogue: %d,%d:%02d:%02d.%02d,%d:%02d:%02d.%02d,%s,%s,%04d,%04d,%04d,%s,%s",
+-                        event->Layer,
+-                        sh, sm, ss, sc,
+-                        eh, em, es, ec,
+-                        (style && style->Name) ? style->Name : "", event->Name,
+-                        event->MarginL, event->MarginR, event->MarginV,
+-                        event->Effect, event->Text);
+-                } else {
+-                    bstr_xappend(NULL, b, bstr0(event->Text));
+-                }
+-                if (is_whitespace_only(bstr_cut(*b, start))) {
+-                    b->len = start;
+-                } else {
+-                    append(b, '\n');
+-                }
+-            }
+-        }
+-    }
+-
+-    bstr_eatend(b, (bstr)bstr0_lit("\n"));
+-
+-    return *b;
+-}
+-
+-static char *get_text(struct sd *sd, double pts, enum sd_text_type type)
+-{
+-    return bstrto0(NULL, get_text_buf(sd, pts, type));
+-}
+-
+-static struct sd_times get_times(struct sd *sd, double pts)
+-{
+-    struct sd_ass_priv *ctx = sd->priv;
+-    ASS_Track *track = ctx->ass_track;
+-    struct sd_times res = { .start = MP_NOPTS_VALUE, .end = MP_NOPTS_VALUE };
+-
+-    if (pts == MP_NOPTS_VALUE)
+-        return res;
+-
+-    long long ipts = find_timestamp(sd, pts);
+-
+-    for (int i = 0; i < track->n_events; ++i) {
+-        ASS_Event *event = track->events + i;
+-        if (ipts >= event->Start && ipts < event->Start + event->Duration) {
+-            double start = event->Start / 1000.0;
+-            double end = event->Duration == UNKNOWN_DURATION ?
+-                MP_NOPTS_VALUE : (event->Start + event->Duration) / 1000.0;
+-
+-            if (res.start == MP_NOPTS_VALUE || res.start > start)
+-                res.start = start;
+-
+-            if (res.end == MP_NOPTS_VALUE || res.end < end)
+-                res.end = end;
+-        }
+-    }
+-
+-    return res;
+-}
+-
+-static void fill_plaintext(struct sd *sd, double pts)
+-{
+-    struct sd_ass_priv *ctx = sd->priv;
+-    ASS_Track *track = ctx->shadow_track;
+-
+-    ass_flush_events(track);
+-
+-    bstr text = get_text_buf(sd, pts, SD_TEXT_TYPE_PLAIN);
+-    if (!text.len)
+-        return;
+-
+-    bstr dst = {0};
+-
+-    while (text.len) {
+-        if (*text.start == '{') {
+-            bstr_xappend(NULL, &dst, bstr0("\\{"));
+-            text = bstr_cut(text, 1);
+-        } else if (*text.start == '\\') {
+-            bstr_xappend(NULL, &dst, bstr0("\\"));
+-            // Break ASS escapes with U+2060 WORD JOINER
+-            mp_append_utf8_bstr(NULL, &dst, 0x2060);
+-            text = bstr_cut(text, 1);
+-        }
+-
+-        int i = bstrcspn(text, "{\\");
+-        bstr_xappend(NULL, &dst, (bstr){text.start, i});
+-        text = bstr_cut(text, i);
+-    }
+-
+-    if (!dst.start)
+-        return;
+-
+-    int n = ass_alloc_event(track);
+-    ASS_Event *event = track->events + n;
+-    event->Start = 0;
+-    event->Duration = INT_MAX;
+-    event->Style = track->default_style;
+-    event->Text = strdup(dst.start);
+-
+-    talloc_free(dst.start);
+-}
+-
+-static void reset(struct sd *sd)
+-{
+-    struct sd_ass_priv *ctx = sd->priv;
+-    if (sd->opts->sub_clear_on_seek || ctx->clear_once) {
+-        ass_flush_events(ctx->ass_track);
+-        ctx->num_seen_packets = 0;
+-        sd->preload_ok = false;
+-        ctx->clear_once = false;
+-    }
+-    if (ctx->converter)
+-        lavc_conv_reset(ctx->converter);
+-}
+-
+-static void uninit(struct sd *sd)
+-{
+-    struct sd_ass_priv *ctx = sd->priv;
+-
+-    filters_destroy(sd);
+-    if (ctx->converter)
+-        lavc_conv_uninit(ctx->converter);
+-    assobjects_destroy(sd);
+-    talloc_free(ctx->copy_cache);
+-}
+-
+-static int control(struct sd *sd, enum sd_ctrl cmd, void *arg)
+-{
+-    struct sd_ass_priv *ctx = sd->priv;
+-    switch (cmd) {
+-    case SD_CTRL_SUB_STEP: {
+-        double *a = arg;
+-        long long ts = llrint(a[0] * 1000.0);
+-        long long res = ass_step_sub(ctx->ass_track, ts, a[1]);
+-        if (!res)
+-            return false;
+-        // Try to account for overlapping durations
+-        a[0] += res / 1000.0 + SUB_SEEK_OFFSET;
+-        return true;
+-    }
+-    case SD_CTRL_SET_ANIMATED_CHECK:
+-        ctx->check_animated = *(bool *)arg;
+-        return CONTROL_OK;
+-    case SD_CTRL_SET_VIDEO_PARAMS:
+-        ctx->video_params = *(struct mp_image_params *)arg;
+-        return CONTROL_OK;
+-    case SD_CTRL_UPDATE_OPTS: {
+-        uint64_t flags = *(uint64_t *)arg;
+-        if (flags & UPDATE_SUB_FILT) {
+-            filters_destroy(sd);
+-            filters_init(sd);
+-            ctx->clear_once = true; // allow reloading on seeks
+-            reset(sd);
+-        }
+-        if (flags & UPDATE_SUB_HARD) {
+-            // ass_track will be recreated, so clear duplicate cache
+-            ctx->clear_once = true;
+-            reset(sd);
+-            assobjects_destroy(sd);
+-            assobjects_init(sd);
+-        }
+-        ctx->ass_configured = false; // ass always needs to be reconfigured
+-        return CONTROL_OK;
+-    }
+-    default:
+-        return CONTROL_UNKNOWN;
+-    }
+-}
+-
+-const struct sd_functions sd_ass = {
+-    .name = "ass",
+-    .accept_packets_in_advance = true,
+-    .init = init,
+-    .decode = decode,
+-    .get_bitmaps = get_bitmaps,
+-    .get_text = get_text,
+-    .get_times = get_times,
+-    .control = control,
+-    .reset = reset,
+-    .select = enable_output,
+-    .uninit = uninit,
+-};
+-
+-// Disgusting hack for (xy-)vsfilter color compatibility.
+-static void mangle_colors(struct sd *sd, struct sub_bitmaps *parts)
+-{
+-    struct mp_subtitle_opts *opts = sd->opts;
+-    struct sd_ass_priv *ctx = sd->priv;
+-    enum pl_color_system csp = 0;
+-    enum pl_color_levels levels = 0;
+-    if (opts->ass_vsfilter_color_compat == 0) // "no"
+-        return;
+-    bool force_601 = opts->ass_vsfilter_color_compat == 3;
+-    ASS_Track *track = ctx->ass_track;
+-    static const int ass_csp[] = {
+-        [YCBCR_BT601_TV]        = PL_COLOR_SYSTEM_BT_601,
+-        [YCBCR_BT601_PC]        = PL_COLOR_SYSTEM_BT_601,
+-        [YCBCR_BT709_TV]        = PL_COLOR_SYSTEM_BT_709,
+-        [YCBCR_BT709_PC]        = PL_COLOR_SYSTEM_BT_709,
+-        [YCBCR_SMPTE240M_TV]    = PL_COLOR_SYSTEM_SMPTE_240M,
+-        [YCBCR_SMPTE240M_PC]    = PL_COLOR_SYSTEM_SMPTE_240M,
+-    };
+-    static const int ass_levels[] = {
+-        [YCBCR_BT601_TV]        = PL_COLOR_LEVELS_LIMITED,
+-        [YCBCR_BT601_PC]        = PL_COLOR_LEVELS_FULL,
+-        [YCBCR_BT709_TV]        = PL_COLOR_LEVELS_LIMITED,
+-        [YCBCR_BT709_PC]        = PL_COLOR_LEVELS_FULL,
+-        [YCBCR_SMPTE240M_TV]    = PL_COLOR_LEVELS_LIMITED,
+-        [YCBCR_SMPTE240M_PC]    = PL_COLOR_LEVELS_FULL,
+-    };
+-    int trackcsp = track->YCbCrMatrix;
+-    if (force_601)
+-        trackcsp = YCBCR_BT601_TV;
+-    // NONE is a bit random, but the intention is: don't modify colors.
+-    if (trackcsp == YCBCR_NONE)
+-        return;
+-    if (trackcsp < MP_ARRAY_SIZE(ass_csp))
+-        csp = ass_csp[trackcsp];
+-    if (trackcsp <  MP_ARRAY_SIZE(ass_levels))
+-        levels = ass_levels[trackcsp];
+-    if (trackcsp == YCBCR_DEFAULT) {
+-        csp = PL_COLOR_SYSTEM_BT_601;
+-        levels = PL_COLOR_LEVELS_LIMITED;
+-    }
+-    // Unknown colorspace (either YCBCR_UNKNOWN, or a valid value unknown to us)
+-    if (!csp || !levels)
+-        return;
+-
+-    struct mp_image_params params = ctx->video_params;
+-
+-    if (force_601) {
+-        params.repr = (struct pl_color_repr){
+-            .sys = PL_COLOR_SYSTEM_BT_709,
+-            .levels = PL_COLOR_LEVELS_LIMITED,
+-        };
+-    }
+-
+-    if ((csp == params.repr.sys && levels == params.repr.levels) ||
+-            params.repr.sys == PL_COLOR_SYSTEM_RGB) // Even VSFilter doesn't mangle on RGB video
+-        return;
+-
+-    bool basic_conv = params.repr.sys == PL_COLOR_SYSTEM_BT_709 &&
+-                      params.repr.levels == PL_COLOR_LEVELS_LIMITED &&
+-                      csp == PL_COLOR_SYSTEM_BT_601 &&
+-                      levels == PL_COLOR_LEVELS_LIMITED;
+-
+-    // With "basic", only do as much as needed for basic compatibility.
+-    if (opts->ass_vsfilter_color_compat == 1 && !basic_conv)
+-        return;
+-
+-    if (params.repr.sys != ctx->last_params.repr.sys ||
+-        params.repr.levels != ctx->last_params.repr.levels)
+-    {
+-        int msgl = basic_conv ? MSGL_V : MSGL_WARN;
+-        ctx->last_params = params;
+-        MP_MSG(sd, msgl, "mangling colors like vsfilter: "
+-               "RGB -> %s %s -> %s %s -> RGB\n",
+-               m_opt_choice_str(pl_csp_names, csp),
+-               m_opt_choice_str(pl_csp_levels_names, levels),
+-               m_opt_choice_str(pl_csp_names, params.repr.sys),
+-               m_opt_choice_str(pl_csp_names, params.repr.levels));
+-    }
+-
+-    // Conversion that VSFilter would use
+-    struct mp_csp_params vs_params = MP_CSP_PARAMS_DEFAULTS;
+-    vs_params.repr.sys = csp;
+-    vs_params.repr.levels = levels;
+-    struct pl_transform3x3 vs_yuv2rgb;
+-    mp_get_csp_matrix(&vs_params, &vs_yuv2rgb);
+-    pl_transform3x3_invert(&vs_yuv2rgb);
+-
+-    // Proper conversion to RGB
+-    struct mp_csp_params rgb_params = MP_CSP_PARAMS_DEFAULTS;
+-    rgb_params.repr = params.repr;
+-    rgb_params.color = params.color;
+-    struct pl_transform3x3 vs2rgb;
+-    mp_get_csp_matrix(&rgb_params, &vs2rgb);
+-
+-    for (int n = 0; n < parts->num_parts; n++) {
+-        struct sub_bitmap *sb = &parts->parts[n];
+-        uint32_t color = sb->libass.color;
+-        int r = (color >> 24u) & 0xff;
+-        int g = (color >> 16u) & 0xff;
+-        int b = (color >>  8u) & 0xff;
+-        int a = 0xff - (color & 0xff);
+-        int rgb[3] = {r, g, b}, yuv[3];
+-        mp_map_fixp_color(&vs_yuv2rgb, 8, rgb, 8, yuv);
+-        mp_map_fixp_color(&vs2rgb, 8, yuv, 8, rgb);
+-        sb->libass.color = MP_ASS_RGBA(rgb[0], rgb[1], rgb[2], a);
+-    }
+-}
+-
+-int sd_ass_fmt_offset(const char *evt_fmt)
+-{
+-    // "Text" is always last (as it's arbitrary content in buf), e.g. format:
+-    // "Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
+-    int n = 0;
+-    while (evt_fmt && (evt_fmt = strchr(evt_fmt, ',')))
+-         evt_fmt++, n++;
+-    return n-1;  // buffer is without the format's Start/End, with ReadOrder
+-}
+-
+-bstr sd_ass_pkt_text(struct sd_filter *ft, struct demux_packet *pkt, int offset)
+-{
+-    // e.g. pkt->buffer ("4" is ReadOrder): "4,0,Default,,0,0,0,,fifth line"
+-    bstr txt = {(char *)pkt->buffer, pkt->len}, t0 = txt;
+-    while (offset-- > 0) {
+-        int n = bstrchr(txt, ',');
+-        if (n < 0) {  // shouldn't happen
+-            MP_WARN(ft, "Malformed event '%.*s'\n", BSTR_P(t0));
+-            return (bstr){NULL, 0};
+-        }
+-        txt = bstr_cut(txt, n+1);
+-    }
+-    return txt;
+-}
+-
+-bstr sd_ass_to_plaintext(char **out, const char *in)
+-{
+-    bstr b = {*out};
+-    ass_to_plaintext(&b, in);
+-    *out = b.start;
+-    return b;
+-}
+diff --git a/sub/stub_libass.c b/sub/stub_libass.c
+new file mode 100644
+index 0000000..1c2df29
+--- /dev/null
++++ b/sub/stub_libass.c
+@@ -0,0 +1,316 @@
++/*
++ * Replacement translation unit for the libass-only sources that the
++ * audio-only libmpv build removes: sub/ass_mp.c, sub/osd_libass.c and
++ * sub/sd_ass.c.
++ *
++ * mpv 0.41 has no build switch to disable libass (sub/osd_dummy.c, which
++ * older releases shipped for exactly this purpose, is long gone). This file
++ * provides every non-static symbol from those three files that code which
++ * stays compiled still references. Signatures are copied verbatim from
++ * sub/osd.h, sub/osd_state.h and sub/sd.h.
++ *
++ * Two classes of symbol live here:
++ *
++ *  - Faithful reimplementations. Everything reproduced below is pure data
++ *    or pure string handling with no libass call in it, so keeping the real
++ *    behaviour costs nothing and avoids silently breaking text-only paths
++ *    (option parsing at startup, the `escape-ass` command, the ASS subtitle
++ *    filters). These are copied verbatim from the removed files.
++ *
++ *  - No-ops / failures. Anything that genuinely needs an ASS_Renderer or
++ *    ASS_Track. Nothing can render without libass, so these report "no
++ *    output" in the way each caller already handles.
++ *
++ * This file is part of mpv.
++ *
++ * mpv is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * mpv is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <string.h>
++
++#include "mpv_talloc.h"
++
++#include "common/common.h"
++#include "common/msg.h"
++#include "misc/bstr.h"
++#include "options/m_option.h"
++
++#include "dec_sub.h"
++#include "osd.h"
++#include "osd_state.h"
++#include "sd.h"
++
++// ---------------------------------------------------------------------------
++// replaces sub/osd_libass.c
++// ---------------------------------------------------------------------------
++
++// Verbatim from sub/osd_libass.c. Only meaningful to a libass renderer, but
++// osd_mangle_ass() below still emits it so that the text it produces stays
++// byte-identical to upstream.
++#define ASS_USE_OSD_FONT "{\\fnmpv-osd-symbols}"
++
++// Caller: sub/osd.c:osd_free(). No renderer state was ever allocated.
++void osd_destroy_backend(struct osd_state *osd)
++{
++    // Nothing to free.
++}
++
++// Caller: player/osd.c:get_osd_sym(). Pure snprintf, verbatim from
++// sub/osd_libass.c: the escape is decoded again by osd_mangle_ass() and by
++// the terminal status line, neither of which needs libass.
++void osd_get_function_sym(char *buffer, size_t buffer_size, int osd_function)
++{
++    snprintf(buffer, buffer_size, OSD_CODEPOINTS_ESCAPE "%c", osd_function);
++}
++
++// Caller: player/command.c:cmd_escape_ass() (the `escape-ass` command) and
++// formerly osd_libass.c itself. Pure string escaping, verbatim from
++// sub/osd_libass.c — `escape-ass` is a text transformation that clients can
++// invoke over the client API, so it must keep working with libass gone.
++void osd_mangle_ass(bstr *dst, const char *in, bool replace_newlines)
++{
++    const char *start = in;
++    bool escape_ass = true;
++    while (*in) {
++        // As used by osd_get_function_sym().
++        size_t len = strlen(OSD_CODEPOINTS_ESCAPE);
++        if (!strncmp(in, OSD_CODEPOINTS_ESCAPE, len) && in[len]) {
++            bstr_xappend(NULL, dst, bstr0(ASS_USE_OSD_FONT));
++            mp_append_utf8_bstr(NULL, dst, OSD_CODEPOINTS + in[len]);
++            bstr_xappend(NULL, dst, bstr0("{\\r}"));
++            in += len + 1;
++            continue;
++        }
++        len = strlen(OSD_ASS_0);
++        if (!strncmp(in, OSD_ASS_0, len)) {
++            escape_ass = false;
++            in += len;
++            continue;
++        }
++        len = strlen(OSD_ASS_1);
++        if (!strncmp(in, OSD_ASS_1, len)) {
++            escape_ass = true;
++            in += len;
++            continue;
++        }
++        len = strlen(TERM_MSG_0);
++        if (!strncmp(in, TERM_MSG_0, len)) {
++            in += len;
++            continue;
++        }
++        if (escape_ass && *in == '{')
++            bstr_xappend(NULL, dst, bstr0("\\"));
++        // Replace newlines with \N for escape-ass. This is necessary to apply
++        // ASS tags past newlines and to preserve consecutive newlines with
++        // osd-overlay because update_external() adds a ASS event per line.
++        if (replace_newlines && *in == '\n') {
++            bstr_xappend(NULL, dst, bstr0("\\N"));
++            in += 1;
++            continue;
++        }
++        // Libass will strip leading whitespace
++        if (in[0] == ' ' && (in == start || in[-1] == '\n')) {
++            bstr_xappend(NULL, dst, bstr0("\\h"));
++            in += 1;
++            continue;
++        }
++        bstr_xappend(NULL, dst, (bstr){(char *)in, 1});
++        // Break ASS escapes with U+2060 WORD JOINER
++        if (escape_ass && *in == '\\')
++            mp_append_utf8_bstr(NULL, dst, 0x2060);
++        in++;
++    }
++}
++
++// Caller: player/command.c:cut_osd_list(), which computes
++// `screen_h / MPMAX(font_h, 1)` and then subtracts one for the header. It is
++// a pure heuristic for how many lines of a list to keep; upstream derives it
++// from the OSD ASS track's PlayResY and style. With no renderer there is no
++// screen, so mirror the terminal fallback in the same function (24 lines) —
++// returning 0 here would make max_lines negative and truncate the list to
++// nothing.
++void osd_get_text_size(struct osd_state *osd, int *out_screen_h, int *out_font_h)
++{
++    *out_screen_h = 720;
++    *out_font_h = 30;
++}
++
++// Caller: player/command.c:cmd_osd_overlay() (the `osd-overlay` command).
++// Storing the overlay would be pointless with nothing to render it. ov->data
++// stays owned by the caller, and ov->out_rc (when requested) is a caller
++// zero-initialised double[4]; leaving it zeroed makes the caller's
++// `rc[0] < rc[2] && rc[1] < rc[3]` bounds check fail, which is its
++// documented "empty overlay" path.
++void osd_set_external(struct osd_state *osd, struct osd_external_ass *ov)
++{
++}
++
++// Caller: player/client.c:mp_destroy_client(). No externals were ever stored.
++void osd_set_external_remove_owner(struct osd_state *osd, void *owner)
++{
++}
++
++// Caller: sub/osd.c:render_object(), for the OSD/EXTERNAL objects. It checks
++// the result for NULL and treats it as "nothing to draw".
++struct sub_bitmaps *osd_object_get_bitmaps(struct osd_state *osd,
++                                           struct osd_object *obj, int format)
++{
++    return NULL;
++}
++
++// ---------------------------------------------------------------------------
++// replaces sub/sd_ass.c
++// ---------------------------------------------------------------------------
++
++// Registered in sub/dec_sub.c's sd_list[]. init() fails, so the ASS decoder
++// is never selected and dec_sub falls through to the remaining drivers
++// (sd_lavc). An audio-only consumer runs sid=no and never gets this far.
++static int stub_sd_ass_init(struct sd *sd)
++{
++    return -1;
++}
++
++const struct sd_functions sd_ass = {
++    .name = "ass",
++    .accept_packets_in_advance = true,
++    .init = stub_sd_ass_init,
++};
++
++// Referenced by options/options.c via OPT_SUBSTRUCT(subs_filt,
++// mp_sub_filter_opts): the option subsystem walks this table while building
++// the config at mpv_create() time, so it must stay a fully valid
++// m_sub_options. Verbatim from sub/sd_ass.c — pure option data.
++#undef OPT_BASE_STRUCT
++#define OPT_BASE_STRUCT struct mp_sub_filter_opts
++
++const struct m_sub_options mp_sub_filter_opts = {
++    .opts = (const struct m_option[]){
++        {"sdh", OPT_BOOL(sub_filter_SDH)},
++        {"sdh-harder", OPT_BOOL(sub_filter_SDH_harder)},
++        {"sdh-enclosures", OPT_STRINGLIST(sub_filter_SDH_enclosures)},
++        {"regex-enable", OPT_BOOL(rf_enable)},
++        {"regex-plain", OPT_BOOL(rf_plain)},
++        {"regex", OPT_STRINGLIST(rf_items)},
++        {"jsre", OPT_STRINGLIST(jsre_items)},
++        {"regex-warn", OPT_BOOL(rf_warn)},
++        {0}
++    },
++    .size = sizeof(OPT_BASE_STRUCT),
++    .defaults = &(OPT_BASE_STRUCT){
++        .sub_filter_SDH_enclosures = (char *[]) {
++            "()",
++            "[]",
++            "\uFF08\uFF09",
++            NULL
++        },
++        .rf_enable = true,
++    },
++    .change_flags = UPDATE_SUB_FILT,
++};
++
++// The three helpers below are the ASS-event string utilities used by the
++// subtitle filters, which stay compiled: sub/filter_sdh.c always, and
++// sub/filter_regex.c / sub/filter_jsre.c when meson enables them. None of
++// them touches libass, so all three are verbatim copies from sub/sd_ass.c.
++//
++// Callers:
++//   sd_ass_fmt_offset   filter_sdh.c:460, filter_regex.c:47, filter_jsre.c:106
++//   sd_ass_pkt_text     filter_sdh.c:460, filter_regex.c:63, filter_jsre.c:114
++//   sd_ass_to_plaintext filter_regex.c:67, filter_jsre.c:118
++
++int sd_ass_fmt_offset(const char *evt_fmt)
++{
++    // "Text" is always last (as it's arbitrary content in buf), e.g. format:
++    // "Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
++    int n = 0;
++    while (evt_fmt && (evt_fmt = strchr(evt_fmt, ',')))
++         evt_fmt++, n++;
++    return n-1;  // buffer is without the format's Start/End, with ReadOrder
++}
++
++bstr sd_ass_pkt_text(struct sd_filter *ft, struct demux_packet *pkt, int offset)
++{
++    // e.g. pkt->buffer ("4" is ReadOrder): "4,0,Default,,0,0,0,,fifth line"
++    bstr txt = {(char *)pkt->buffer, pkt->len}, t0 = txt;
++    while (offset-- > 0) {
++        int n = bstrchr(txt, ',');
++        if (n < 0) {  // shouldn't happen
++            MP_WARN(ft, "Malformed event '%.*s'\n", BSTR_P(t0));
++            return (bstr){NULL, 0};
++        }
++        txt = bstr_cut(txt, n+1);
++    }
++    return txt;
++}
++
++static void append(bstr *b, char c)
++{
++    bstr_xappend(NULL, b, (bstr){&c, 1});
++}
++
++static void ass_to_plaintext(bstr *b, const char *in)
++{
++    const char *open_tag_pos = NULL;
++    bool in_drawing = false;
++    while (*in) {
++        if (open_tag_pos) {
++            if (in[0] == '}') {
++                in += 1;
++                open_tag_pos = NULL;
++            } else if (in[0] == '\\' && in[1] == 'p' && in[2] != 'o') {
++                in += 2;
++                // Skip text between \pN and \p0 tags. A \p without a number
++                // is the same as \p0, and leading 0s are also allowed.
++                in_drawing = false;
++                while (in[0] >= '0' && in[0] <= '9') {
++                    if (in[0] != '0')
++                        in_drawing = true;
++                    in += 1;
++                }
++            } else {
++                in += 1;
++            }
++        } else {
++            if (in[0] == '\\' && (in[1] == 'N' || in[1] == 'n')) {
++                in += 2;
++                append(b, '\n');
++            } else if (in[0] == '\\' && in[1] == 'h') {
++                in += 2;
++                append(b, ' ');
++            } else if (in[0] == '{') {
++                open_tag_pos = in;
++                in += 1;
++            } else {
++                if (!in_drawing)
++                    append(b, in[0]);
++                in += 1;
++            }
++        }
++    }
++    // A '{' without a closing '}' is always visible.
++    if (open_tag_pos) {
++        bstr_xappend(NULL, b, bstr0(open_tag_pos));
++    }
++}
++
++bstr sd_ass_to_plaintext(char **out, const char *in)
++{
++    bstr b = {*out};
++    ass_to_plaintext(&b, in);
++    *out = b.start;
++    return b;
++}

@@ -124,12 +124,18 @@ audio_default_options = [
     '--enable-demuxer=flv',
     # HLS. Note that `--enable-protocol=hls` below is NOT this: that is the
     # deprecated `hls://` protocol and is useless without the demuxer. In
-    # ffmpeg 6.0 `hls_demuxer_select="adts_header ac3_parser mov_demuxer
-    # mpegts_demuxer"`, and every one of those is already satisfied by this
-    # list (the aac* decoders pull adts_header; ac3 parser, mov demuxer and
-    # the crypto protocol for AES-128 are all enabled above), so these two
-    # lines add the HLS and MPEG-TS demuxers and nothing else. No new external
-    # library, no GPL code: still LGPLv3 via --enable-version3.
+    # ffmpeg 8.1.2 `hls_demuxer_select="aac_demuxer ac3_demuxer adts_header
+    # ac3_parser eac3_demuxer mov_demuxer mpegts_demuxer"` (configure:3885) —
+    # one entry longer than 6.0's — and configure force-enables the whole
+    # `_select` chain, so these two lines add the HLS and MPEG-TS demuxers and
+    # nothing else. No new external library, no GPL code: still LGPLv3 via
+    # --enable-version3.
+    #
+    # 8.1.2 makes the point better than any comment could: FFmpeg finally
+    # deleted the `hls://` protocol, so `--enable-protocol=hls` below now emits
+    # `WARNING: Option --enable-protocol=hls did not match anything` and HLS
+    # keeps working, because what carries it is the DEMUXER. The dead flag is
+    # left in place so this diff stays about the version bump.
     # `video_default_options` has carried both since forever — only the audio
     # flavour lacked them.
     '--enable-demuxer=hls',
@@ -193,9 +199,13 @@ audio_default_options = [
     # FLTP, anequalizer/dynaudnorm DBLP, loudnorm/crossfeed/acompressor/
     # alimiter DBL (packed), biquads S16P|S32P|FLTP|DBLP -- and loudnorm also
     # pins 192 kHz input in its non-linear mode. Its only configure dep is
-    # `aresample_filter_deps="swresample"` (configure:3630) and
-    # `--enable-swresample` is already in `common_options` -- checked, not
-    # assumed.
+    # `aresample_filter_deps="swresample"` and `--enable-swresample` is already
+    # in `common_options` -- checked, not assumed.
+    #
+    # RE-VERIFIED against FFmpeg 8.1.2 for this engine bump by feeding the exact
+    # option list below to 8.1.2's own configure: it exits 0, all 18 filters
+    # land in `Enabled filters:`, and the only entry in the whole audio/default
+    # list that matches nothing is the dead `--enable-protocol=hls` noted above.
     #
     # Everything else here has NO `_deps`/`_select`/`_suggest` line in FFmpeg
     # 6.0's configure (grepped `^<name>_filter_(deps|select|suggest)=` for each;

@@ -4,10 +4,16 @@
     url = "https://code.videolan.org/videolan/dav1d/-/archive/1.2.1/dav1d-1.2.1.tar.bz2";
     sha256 = "a4003623cdc0109dec3aac8435520aa3fb12c4d69454fa227f2658cdb6dab5fa";
   };
+  # FFmpeg 8.1.2 ("Hoare" line). The floor is mpv 0.41's own
+  # `dependency('libavcodec', version: '>= 60.31.102')` (meson.build:21), i.e.
+  # FFmpeg >= 6.1. Deliberately NOT n9.0: that branch was cut six months AFTER
+  # mpv 0.41.0 shipped and has no point release yet. The 8.1 line is maintained
+  # and is the pairing the Android half of this engine bump also ships, so both
+  # platforms run one FFmpeg.
   ffmpeg = {
-    version = "6.0";
-    url = "https://ffmpeg.org/releases/ffmpeg-6.0.tar.xz";
-    sha256 = "57be87c22d9b49c112b6d24bc67d42508660e6b718b3db89c44e47e289137082";
+    version = "8.1.2";
+    url = "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz";
+    sha256 = "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c";
   };
   fftools-ffi = {
     version = "9b0d4da0";
@@ -38,6 +44,38 @@
     version = "1.3.5";
     url = "https://github.com/xiph/ogg/releases/download/v1.3.5/libogg-1.3.5.tar.gz";
     sha256 = "0eb4b4b9420a0f51db142ba3f9c64b333f826532dc0f48c6410ae51f4799b664";
+  };
+  # libplacebo became a MANDATORY dependency of mpv in 0.37.0: mpv 0.36's
+  # meson.build had `option('libplacebo', ...)`, 0.41's has a bare
+  # `dependency('libplacebo', version: '>=6.338.2')` (meson.build:29). It is
+  # reached from core, non-video translation units (demux/demux_mkv.c,
+  # filters/f_lavfi.c, player/main.c, video/mp_image.c, video/sws_utils.c), so
+  # unlike libass it cannot be stripped -- see nix/packages/mk-pkg-libplacebo.
+  #
+  # 6.338.2 is exactly mpv 0.41's declared minimum. NOT 7.x: that drops symbols
+  # mpv 0.41's csputils.h still references under mobile cross-files, and the
+  # Android half of this engine pins 6.338.2 for the same reason.
+  #
+  # github.com/haasn (libplacebo's own author, upstream's own mirror) rather
+  # than code.videolan.org, which refuses connections from some networks.
+  libplacebo = {
+    version = "6.338.2";
+    url = "https://github.com/haasn/libplacebo/archive/refs/tags/v6.338.2.tar.gz";
+    sha256 = "2f1e624e09d72a8c9db70f910f7560e764a1c126dae42acc5b3bcef836a7aec6";
+  };
+  # libplacebo's `3rdparty/fast_float` submodule, at the exact commit v6.338.2
+  # points at. A GitHub release tarball carries empty submodule directories, and
+  # for every other submodule that is fine (they are all vulkan/opengl/glad
+  # build-time helpers, and every GPU backend is disabled). fast_float is NOT
+  # optional on Apple: src/convert.cc falls back to `std::from_chars` for
+  # float/double, libc++ shipped with Xcode 16.x does not implement the
+  # floating-point overloads, and convert.cc's own
+  # `static_assert(!is_fp, "<fast_float/fast_float.h> is required, ...")` turns
+  # that into a hard compile error. Header-only, Apache-2.0/MIT/BSL.
+  fastFloat = {
+    version = "2b2395f9";
+    url = "https://github.com/fastfloat/fast_float/archive/2b2395f9ac836ffca6404424bcc252bff7aa80e4.tar.gz";
+    sha256 = "230d20e4e4ac1f6a9df92c4d746c6ec536cdb0c085bc8635d4b88cead5dc22cb";
   };
   libpng = {
     version = "1.6.40";
@@ -75,9 +113,9 @@
     sha256 = "a420fcf7103e54e775c383e3751729b8fb2dcd087f6165befd13f28315f754f5";
   };
   mpv = {
-    version = "0.36.0";
-    url = "https://github.com/mpv-player/mpv/archive/refs/tags/v0.36.0.tar.gz";
-    sha256 = "29abc44f8ebee013bb2f9fe14d80b30db19b534c679056e4851ceadf5a5e8bf6";
+    version = "0.41.0";
+    url = "https://github.com/mpv-player/mpv/archive/refs/tags/v0.41.0.tar.gz";
+    sha256 = "ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209";
   };
   uchardet = {
     version = "0.0.8";

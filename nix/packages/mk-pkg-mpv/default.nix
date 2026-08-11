@@ -261,27 +261,22 @@ pkgs.stdenvNoCC.mkDerivation {
       -Dlibmpv=true `# libmpv library`
       -Dbuild-date=true `# whether to include binary compile time`
 
-      `# rn-media parity release, item 7: iconv is now DISABLED here, matching`
-      `# Android, which cannot have it. Decided on evidence, not preference:`
+      `# misc features`
       `#`
-      `#   * Android builds at API level 21 (buildscripts/build.sh) and bionic`
-      `#     only gained iconv(3) at API 28, so -Diconv=enabled there fails the`
-      `#     meson check outright. Getting it would mean raising minSdk to 28 --`
-      `#     dropping Android 5 through 8 -- or vendoring GNU libiconv as a new`
-      `#     engine dependency. Both are product decisions, not build fixes.`
-      `#   * What it costs here is smaller than it looks. mpv reaches iconv`
-      `#     through mp_charset_guess()/mp_iconv_to_utf8() for metadata, ICY`
-      `#     stream titles, CUE sheets and playlists -- but only when a charset`
-      `#     is actually named. --metadata-codepage defaults to empty, in which`
-      `#     case mp_iconv_to_utf8() returns the buffer untouched even WITH`
-      `#     iconv present, and "auto" needs uchardet, which both forks disable.`
-      `#     So with today's options this was inert on iOS.`
+      `# rn-media parity release, item 7. iconv stays ENABLED here, and Android`
+      `# now has it too -- it vendors GNU libiconv statically (see that fork's`
+      `# buildscripts/scripts/libiconv.sh). The first pass at this aligned the`
+      `# two forks by DISABLING iconv here, which was the wrong direction: it`
+      `# made the platforms match by taking a working feature away from one of`
+      `# them, and owning these forks is precisely so a platform's libc does not`
+      `# decide our feature set.`
       `#`
-      `# THE LOSS, stated exactly: rn-media can no longer set`
-      `# --metadata-codepage=<explicit charset> and have it applied on iOS. It`
-      `# could not do so on Android either, which is the point. To restore it on`
-      `# BOTH, vendor libiconv (or raise Android's minSdk to 28) and flip this`
-      `# back -- tracked in rn-media task #32.`
+      `# What it buys, on both platforms now: mpv converts non-UTF-8 text to`
+      `# UTF-8 in misc/charset_conv.c for --metadata-codepage, ICY stream titles`
+      `# from Shoutcast/Icecast radio, CUE sheets and playlist files. Old music`
+      `# libraries are full of Latin-1, CP1251 and Shift-JIS tags, and internet`
+      `# radio titles are worse.`
+      -Diconv=enabled `# iconv`
     )
 
     COMMON_VIDEO_OPTIONS=(

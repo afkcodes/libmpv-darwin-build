@@ -39,6 +39,8 @@ let
   name = "libplacebo";
   packageLock = (import ../../../packages.lock.nix).${name};
   fastFloatLock = (import ../../../packages.lock.nix).fastFloat;
+  jinjaLock = (import ../../../packages.lock.nix).jinja;
+  markupsafeLock = (import ../../../packages.lock.nix).markupsafe;
   inherit (packageLock) version;
 
   callPackage = pkgs.lib.callPackageWith { inherit pkgs os arch; };
@@ -54,18 +56,30 @@ let
     name = "${pname}-fast-float-source-${fastFloatLock.version}";
     inherit (fastFloatLock) url sha256;
   };
+  jinja = callPackage ../../utils/fetch-tarball/default.nix {
+    name = "${pname}-jinja-source-${jinjaLock.version}";
+    inherit (jinjaLock) url sha256;
+  };
+  markupsafe = callPackage ../../utils/fetch-tarball/default.nix {
+    name = "${pname}-markupsafe-source-${markupsafeLock.version}";
+    inherit (markupsafeLock) url sha256;
+  };
 
   # A GitHub release tarball carries libplacebo's `3rdparty/` submodule
-  # directories empty. Four of the five (glad, jinja, markupsafe,
-  # Vulkan-Headers) are only reached by the Vulkan/OpenGL code generators, and
-  # every GPU backend is disabled here -- verified by configuring and building
-  # 6.338.2 with all of them absent. fast_float is the exception and is vendored
-  # in; see packages.lock.nix for why it is load-bearing on Apple specifically.
+  # directories empty. Two of the five -- glad and Vulkan-Headers -- are only
+  # reached by the Vulkan/OpenGL code generators, and every GPU backend is
+  # disabled here, verified by building 6.338.2 with all five absent. The other
+  # three are vendored; see packages.lock.nix for what each one is load-bearing
+  # for. `meson.build:443-444` is what puts jinja/markupsafe on the glsl_preproc
+  # generator's PYTHONPATH, so dropping them in these exact directories is the
+  # supported wiring, not a hack.
   vendoredSource = pkgs.runCommand "${pname}-vendored-source-${version}" { } ''
     cp -r ${src} $out
     chmod -R u+w $out
-    mkdir -p $out/3rdparty/fast_float
+    mkdir -p $out/3rdparty/fast_float $out/3rdparty/jinja $out/3rdparty/markupsafe
     cp -r ${fastFloat}/. $out/3rdparty/fast_float/
+    cp -r ${jinja}/. $out/3rdparty/jinja/
+    cp -r ${markupsafe}/. $out/3rdparty/markupsafe/
   '';
 in
 

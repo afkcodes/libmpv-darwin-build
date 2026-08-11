@@ -63,19 +63,43 @@
     url = "https://github.com/haasn/libplacebo/archive/refs/tags/v6.338.2.tar.gz";
     sha256 = "2f1e624e09d72a8c9db70f910f7560e764a1c126dae42acc5b3bcef836a7aec6";
   };
-  # libplacebo's `3rdparty/fast_float` submodule, at the exact commit v6.338.2
-  # points at. A GitHub release tarball carries empty submodule directories, and
-  # for every other submodule that is fine (they are all vulkan/opengl/glad
-  # build-time helpers, and every GPU backend is disabled). fast_float is NOT
-  # optional on Apple: src/convert.cc falls back to `std::from_chars` for
-  # float/double, libc++ shipped with Xcode 16.x does not implement the
-  # floating-point overloads, and convert.cc's own
-  # `static_assert(!is_fp, "<fast_float/fast_float.h> is required, ...")` turns
-  # that into a hard compile error. Header-only, Apache-2.0/MIT/BSL.
+  # Three of libplacebo's five `3rdparty/` submodules, at the exact commits
+  # v6.338.2 points at. A GitHub release tarball carries the submodule
+  # directories EMPTY, and for `glad` and `Vulkan-Headers` that is fine (they
+  # feed the Vulkan/OpenGL code generators, and every GPU backend is disabled
+  # here — verified by building 6.338.2 with all five absent). The other three
+  # are load-bearing:
+  #
+  #   fastFloat   src/convert.cc falls back to `std::from_chars` for
+  #               float/double; libc++ in Xcode 16.x does not implement the
+  #               floating-point overloads, and convert.cc's own
+  #               `static_assert(!is_fp, "<fast_float/fast_float.h> is
+  #               required, ...")` turns that into a hard compile error.
+  #               Header-only, Apache-2.0/MIT/BSL.
+  #   jinja       `tools/glsl_preproc` (which runs for EVERY build, not just GPU
+  #               ones — it generates src/shaders/*.c) does `import jinja2`, and
+  #               libplacebo's meson.build:443-444 puts these two submodules on
+  #               the generator's PYTHONPATH rather than requiring a system
+  #               install. Absent, the build dies with `ModuleNotFoundError: No
+  #               module named 'jinja2'` (observed: CI run 31459350681).
+  #   markupsafe  jinja2's only hard runtime dependency.
+  #
+  # Both are BSD-3-Clause, pure Python, and are build-time tools only: nothing
+  # from them reaches the shipped binary.
   fastFloat = {
     version = "2b2395f9";
     url = "https://github.com/fastfloat/fast_float/archive/2b2395f9ac836ffca6404424bcc252bff7aa80e4.tar.gz";
     sha256 = "230d20e4e4ac1f6a9df92c4d746c6ec536cdb0c085bc8635d4b88cead5dc22cb";
+  };
+  jinja = {
+    version = "b08cd4bc";
+    url = "https://github.com/pallets/jinja/archive/b08cd4bc64bb980df86ed2876978ae5735572280.tar.gz";
+    sha256 = "9a20bab550a760ccb9b38a45d4fe76be92649206ee04633c646d0935a1872b0e";
+  };
+  markupsafe = {
+    version = "c0254f0c";
+    url = "https://github.com/pallets/markupsafe/archive/c0254f0cfe51720ecc9e72e8896022af29af5b44.tar.gz";
+    sha256 = "1826c5d89cc1aa0b3088f538726d339e0c5cd69fbe03f7b8f9a3f880474d1120";
   };
   libpng = {
     version = "1.6.40";

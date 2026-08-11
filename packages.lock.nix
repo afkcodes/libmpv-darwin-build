@@ -63,29 +63,43 @@
     url = "https://github.com/haasn/libplacebo/archive/refs/tags/v6.338.2.tar.gz";
     sha256 = "2f1e624e09d72a8c9db70f910f7560e764a1c126dae42acc5b3bcef836a7aec6";
   };
-  # Three of libplacebo's five `3rdparty/` submodules, at the exact commits
+  # FOUR of libplacebo's five `3rdparty/` submodules, at the exact commits
   # v6.338.2 points at. A GitHub release tarball carries the submodule
-  # directories EMPTY, and for `glad` and `Vulkan-Headers` that is fine (they
-  # feed the Vulkan/OpenGL code generators, and every GPU backend is disabled
-  # here — verified by building 6.338.2 with all five absent). The other three
-  # are load-bearing:
+  # directories EMPTY, and only `glad` survives being empty (it is the
+  # Vulkan/OpenGL loader generator, and every GPU backend is disabled here —
+  # confirmed by the CI run that compiled 51 of libplacebo's 52 objects with it
+  # absent). The other four are all load-bearing, and each was found the same
+  # way: a Linux host has the system copy installed, so "it builds here" proves
+  # nothing about the nix sandbox. Written down so the next bump does not
+  # rediscover them one CI run at a time.
   #
-  #   fastFloat   src/convert.cc falls back to `std::from_chars` for
-  #               float/double; libc++ in Xcode 16.x does not implement the
-  #               floating-point overloads, and convert.cc's own
-  #               `static_assert(!is_fp, "<fast_float/fast_float.h> is
-  #               required, ...")` turns that into a hard compile error.
-  #               Header-only, Apache-2.0/MIT/BSL.
-  #   jinja       `tools/glsl_preproc` (which runs for EVERY build, not just GPU
-  #               ones — it generates src/shaders/*.c) does `import jinja2`, and
-  #               libplacebo's meson.build:443-444 puts these two submodules on
-  #               the generator's PYTHONPATH rather than requiring a system
-  #               install. Absent, the build dies with `ModuleNotFoundError: No
-  #               module named 'jinja2'` (observed: CI run 31459350681).
-  #   markupsafe  jinja2's only hard runtime dependency.
-  #
-  # Both are BSD-3-Clause, pure Python, and are build-time tools only: nothing
-  # from them reaches the shipped binary.
+  #   fastFloat        src/convert.cc falls back to `std::from_chars` for
+  #                    float/double; libc++ in Xcode 16.x does not implement the
+  #                    floating-point overloads, and convert.cc's own
+  #                    `static_assert(!is_fp, "<fast_float/fast_float.h> is
+  #                    required, ...")` turns that into a hard compile error.
+  #                    Header-only, Apache-2.0/MIT/BSL.
+  #   jinja            `tools/glsl_preproc` runs for EVERY build, not just GPU
+  #                    ones (it generates src/shaders/*.c), and does
+  #                    `import jinja2`. libplacebo's meson.build:443-444 puts
+  #                    these two submodules on the generator's PYTHONPATH rather
+  #                    than requiring a system install. Absent:
+  #                    `ModuleNotFoundError: No module named 'jinja2'`
+  #                    (CI run 31459350681). BSD-3-Clause, pure Python,
+  #                    build-time only.
+  #   markupsafe       jinja2's only hard runtime dependency. Same licence and
+  #                    same build-time-only status.
+  #   vulkanHeaders    `src/vulkan/stubs.c` is compiled even when Vulkan is
+  #                    DISABLED — it is what keeps libplacebo's public Vulkan
+  #                    ABI present as no-ops — and it includes
+  #                    `libplacebo/vulkan.h`, which includes
+  #                    `<vulkan/vulkan.h>`. Absent: `fatal error:
+  #                    'vulkan/vulkan.h' file not found` (CI run 31459857826).
+  #                    Vendoring it also removes a `Requires: vulkan` from the
+  #                    generated libplacebo.pc, because with the submodule
+  #                    present libplacebo declares an internal header dependency
+  #                    instead of a pkg-config one. Apache-2.0/MIT. Headers
+  #                    only; Vulkan stays disabled and `pl_has_vulkan=0`.
   fastFloat = {
     version = "2b2395f9";
     url = "https://github.com/fastfloat/fast_float/archive/2b2395f9ac836ffca6404424bcc252bff7aa80e4.tar.gz";
@@ -100,6 +114,11 @@
     version = "c0254f0c";
     url = "https://github.com/pallets/markupsafe/archive/c0254f0cfe51720ecc9e72e8896022af29af5b44.tar.gz";
     sha256 = "1826c5d89cc1aa0b3088f538726d339e0c5cd69fbe03f7b8f9a3f880474d1120";
+  };
+  vulkanHeaders = {
+    version = "d732b2de";
+    url = "https://github.com/KhronosGroup/Vulkan-Headers/archive/d732b2de303ce505169011d438178191136bfb00.tar.gz";
+    sha256 = "570f9ae1e65466dbaf5fcab667abd079dd0a61c4ab86cf535efd492bf70a5b74";
   };
   libpng = {
     version = "1.6.40";

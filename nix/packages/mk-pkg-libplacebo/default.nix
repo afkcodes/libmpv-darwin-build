@@ -41,6 +41,7 @@ let
   fastFloatLock = (import ../../../packages.lock.nix).fastFloat;
   jinjaLock = (import ../../../packages.lock.nix).jinja;
   markupsafeLock = (import ../../../packages.lock.nix).markupsafe;
+  vulkanHeadersLock = (import ../../../packages.lock.nix).vulkanHeaders;
   inherit (packageLock) version;
 
   callPackage = pkgs.lib.callPackageWith { inherit pkgs os arch; };
@@ -64,22 +65,28 @@ let
     name = "${pname}-markupsafe-source-${markupsafeLock.version}";
     inherit (markupsafeLock) url sha256;
   };
+  vulkanHeaders = callPackage ../../utils/fetch-tarball/default.nix {
+    name = "${pname}-vulkan-headers-source-${vulkanHeadersLock.version}";
+    inherit (vulkanHeadersLock) url sha256;
+  };
 
   # A GitHub release tarball carries libplacebo's `3rdparty/` submodule
-  # directories empty. Two of the five -- glad and Vulkan-Headers -- are only
-  # reached by the Vulkan/OpenGL code generators, and every GPU backend is
-  # disabled here, verified by building 6.338.2 with all five absent. The other
-  # three are vendored; see packages.lock.nix for what each one is load-bearing
-  # for. `meson.build:443-444` is what puts jinja/markupsafe on the glsl_preproc
-  # generator's PYTHONPATH, so dropping them in these exact directories is the
-  # supported wiring, not a hack.
+  # directories EMPTY. Only `glad` survives that -- it is the Vulkan/OpenGL
+  # loader generator and every GPU backend is disabled here. The other four are
+  # vendored; packages.lock.nix records exactly what each is load-bearing for
+  # and which CI run proved it. Dropping them into these directory names is the
+  # supported wiring, not a hack: libplacebo's own meson.build looks for
+  # `3rdparty/<name>` (`fs.is_dir` for fast_float and Vulkan-Headers,
+  # meson.build:443-444 for the jinja/markupsafe PYTHONPATH).
   vendoredSource = pkgs.runCommand "${pname}-vendored-source-${version}" { } ''
     cp -r ${src} $out
     chmod -R u+w $out
-    mkdir -p $out/3rdparty/fast_float $out/3rdparty/jinja $out/3rdparty/markupsafe
+    mkdir -p $out/3rdparty/fast_float $out/3rdparty/jinja \
+             $out/3rdparty/markupsafe $out/3rdparty/Vulkan-Headers
     cp -r ${fastFloat}/. $out/3rdparty/fast_float/
     cp -r ${jinja}/. $out/3rdparty/jinja/
     cp -r ${markupsafe}/. $out/3rdparty/markupsafe/
+    cp -r ${vulkanHeaders}/. $out/3rdparty/Vulkan-Headers/
   '';
 in
 

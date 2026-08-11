@@ -70,6 +70,24 @@ let
     # variant — it is four files, no build-system files, and the same patch
     # file the Android fork carries, so the two platforms stay one engine.
     patch -p1 <${../../../patches/mpv-rn-media-pcm-tap.patch}
+    # rn-media: the `on_prefetch_load` client hook + the read-only
+    # `prefetch-playlist-entry-id` property. mpv's --prefetch-playlist opens the
+    # next entry's RAW filename (prefetch_next() calls start_open() directly and
+    # never reaches process_hooks()), so a URL-rewriting resolver never sees it
+    # and the prefetch is then discarded by open_demux_reentrant()'s strcmp --
+    # making prefetch measurably worse than no prefetch for a network queue.
+    # Upstream calls that permanent (DOCS/man/options.rst, --prefetch-playlist).
+    # Adds no exports: it rides mpv_hook_add/mpv_hook_continue, so ./mpv.exp is
+    # unchanged at 54 names. Byte-identical to the Android fork's
+    # buildscripts/patches/mpv/006.rn_media_prefetch_hook.patch (sha256
+    # 3190f94abfc048d12a2c669fccbcc4e74c781c3c82d9d8e9a2c1b2d9a5f55ecf), same as
+    # the pcm-tap patch above -- one engine, one patch file.
+    #
+    # --fuzz=0 per ARCHITECTURE.md 11: a patch that applies with fuzz applies
+    # QUIETLY WRONG. The lines above still run at GNU patch's default fuzz 2;
+    # fixing that for the whole series is tracked separately (#32) and is
+    # deliberately not folded into this commit.
+    patch -p1 --fuzz=0 <${../../../patches/mpv-rn-media-prefetch-hook.patch}
     cd -
 
     cp -r $src $out

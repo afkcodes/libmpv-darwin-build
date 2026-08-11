@@ -303,7 +303,21 @@ pkgs.stdenvNoCC.mkDerivation {
       if [ "${variant}" == "${variants.video}" ]; then
         OPTIONS+=("''${MACOS_VIDEO_OPTIONS[@]}")
       fi
-    elif [ "${os}" == "${oses.ios}" ]; then
+    # iossimulator is a THIRD os value, not a flavour of ios, so an "== ios"
+    # test alone leaves the simulator matching neither branch -- it falls
+    # through to DISABLE_ALL_OPTIONS and ships with EVERY audio output off.
+    # The simulator slice of v0.7.2-rnmedia.5 has no AO at all: its own embedded
+    # meson line reads -Daudiounit=disabled -Davfoundation=disabled
+    # -Daudiotrack=disabled -Daaudio=disabled -Dcoreaudio=disabled
+    # -Dopensles=disabled, so libmpv cannot play audio in the iOS Simulator
+    # while the device slice is fine. Found by rn-media-engine's
+    # "workshop verify-artifacts"; tracked there as manifest/engine.json
+    # repoDivergences/ios-simulator-has-no-audio-output.
+    #
+    # mk-out-frameworks/default.nix:83 already uses the correct idiom
+    # ("== ios" OR "== iossimulator"); this is the same test, and the two files
+    # disagreeing is what let it through.
+    elif [ "${os}" == "${oses.ios}" ] || [ "${os}" == "${oses.iossimulator}" ]; then
       OPTIONS+=("''${IOS_OPTIONS[@]}")
       if [ "${variant}" == "${variants.video}" ]; then
         OPTIONS+=("''${IOS_VIDEO_OPTIONS[@]}")

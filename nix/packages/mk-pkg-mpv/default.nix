@@ -104,6 +104,24 @@ let
     # discipline, not enforcement -- sync from the workshop, never edit here.
     #
     patch -p1 $patchflags <${../../../patches/mpv-rn-media-prefetch-hook.patch}
+    # rn-media #30: strip the dead subsystems from the AUDIO variant — the
+    # GPU/shader render stack, the terminal VOs, encode mode, screenshot, the
+    # image writer, the bitmap-subtitle path and mpv's default key bindings.
+    #
+    # THE VARIANT GUARD IS THE WHOLE POINT, not a precaution. This patch deletes
+    # video/out/gpu/*, vo_gpu.c, vo_gpu_next.c and placebo/ra_pl.c — i.e. exactly
+    # the renderer the VIDEO variant exists to build. Applying it there would not
+    # fail loudly; it would produce a video framework that cannot render. The
+    # canonical copy declares variants: ["audio"] for the same reason
+    # (rn-media-engine patches/011-strip-mpv-dead), and `workshop verify` proves
+    # the series applies clean to mpv/darwin/audio.
+    #
+    # Worth -1,302,408 bytes (-14.10%) on the Android arm64 artifact, where it
+    # was measured against a 62-assertion artifact probe and a 50-assertion
+    # on-device harness. Generated from the workshop — do not edit here.
+    if [ "${variant}" == "${variants.audio}" ]; then
+      patch -p1 $patchflags <${../../../patches/mpv-strip-dead.patch}
+    fi
     cd -
 
     cp -r $src $out

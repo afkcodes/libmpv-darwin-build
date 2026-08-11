@@ -281,7 +281,21 @@ audio_default_options = [
     #
     # Mirrors afkcodes/libmpv-android-audio-build@v1.1.9-rnmedia.2 so the two
     # platforms expose the same filter set to rn-media.
-    '--enable-filter=overlay',
+    #
+    # `--enable-filter=overlay` is GONE as of rn-media #30, and it leaves BOTH
+    # forks in the same release on purpose: dropping it on one side only would
+    # re-diverge the two audio artifacts, which is the thing the parity release
+    # existed to fix. overlay is a VIDEO filter -- it composites one video frame
+    # onto another -- and it predates every audio filter in this list: it is one
+    # of the two entries the upstream flavour script shipped, so it was
+    # inherited, never chosen. Neither audio engine can reach it (vid=no,
+    # vo=null; mpv touches libavfilter only through filters/f_lavfi.c, and the
+    # audio graph rejects a video filter at format negotiation). Measured on the
+    # Android artifact with the linker's --why-extract rather than estimated:
+    # vf_overlay.o is 50,080 allocated bytes and alone pulls framesync.o (3,956)
+    # and drawutils.o (6,956); the shipped .so shrank 69,016 bytes. All 17 AUDIO
+    # filters below are untouched. Only the `default` (LGPL) flavour is edited,
+    # because that is the only one rn-media ships.
     '--enable-filter=aresample',
     '--enable-filter=aformat',
     '--enable-filter=anull',

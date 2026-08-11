@@ -79,9 +79,15 @@ let
     # Upstream calls that permanent (DOCS/man/options.rst, --prefetch-playlist).
     # Adds no exports: it rides mpv_hook_add/mpv_hook_continue, so ./mpv.exp is
     # unchanged at 54 names. Byte-identical to the Android fork's
-    # buildscripts/patches/mpv/006.rn_media_prefetch_hook.patch (sha256
-    # 3190f94abfc048d12a2c669fccbcc4e74c781c3c82d9d8e9a2c1b2d9a5f55ecf), same as
-    # the pcm-tap patch above -- one engine, one patch file.
+    # buildscripts/patches/mpv/006.rn_media_prefetch_hook.patch, same as the
+    # pcm-tap patch above -- one engine, one patch file. No hash inlined here on
+    # purpose: an earlier revision pinned this file's OWN sha256, a
+    # self-referential check that can never fail, and the copies drifted the
+    # same day (prose only; the diff bodies stayed identical). The canonical copy
+    # lives in afkcodes/rn-media-engine (patches/004-prefetch-hook, proven
+    # tree-equivalent to this diff in that repo's CI); until the workshop's
+    # sync --check lands in this repo's CI, identity with the Android copy is
+    # discipline, not enforcement -- sync from the workshop, never edit here.
     #
     # --fuzz=0 per ARCHITECTURE.md 11: a patch that applies with fuzz applies
     # QUIETLY WRONG. The lines above still run at GNU patch's default fuzz 2;
